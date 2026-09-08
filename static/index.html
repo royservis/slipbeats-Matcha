@@ -184,6 +184,7 @@ Everywhere by Fleetwood Mac
       <button id="btnAutoAdd" title="Add the top candidate for every song with an exact match">Add all exact matches</button>
       <div class="missingbar" id="missingbar">
         <span class="hint">Missing songs:</span>
+        <button id="btnRecheck" class="primary" title="Search the library again for just the missing songs — use after buying tracks and rescanning">Re-check missing</button>
         <button id="btnCopyMissing" title="Copy 'Artist - Title' lines to the clipboard for record-pool searches">Copy</button>
         <button id="btnSaveMissing" title="Save as a .txt file next to your exports">Save .txt</button>
         <button id="btnSpMissing" title="Create a private Spotify playlist of the missing songs">Spotify playlist</button>
@@ -296,7 +297,8 @@ async function refreshStatus(){
     if(sc.running){bar.style.display='block';const pct=sc.total?Math.round(100*sc.done/sc.total):0;bar.firstElementChild.style.width=pct+'%';msg.textContent=`scanning ${sc.done.toLocaleString('en-GB')}/${sc.total.toLocaleString('en-GB')}`;
       if(!scanTimer)scanTimer=setInterval(refreshStatus,700)}
     else{bar.style.display='none';msg.textContent=sc.finished?`${sc.added} added, ${sc.updated} updated, ${sc.removed} missing`:'';
-      if(scanTimer){clearInterval(scanTimer);scanTimer=null;toast(`Scan finished: ${sc.added} added, ${sc.updated} updated, ${sc.removed} missing`)}}
+      if(scanTimer){clearInterval(scanTimer);scanTimer=null;toast(`Scan finished: ${sc.added} added, ${sc.updated} updated, ${sc.removed} missing`);
+        if(sc.added>0&&S.requests.some(isMissing)){setTimeout(()=>{if(confirm(`${sc.added} new file${sc.added===1?'':'s'} indexed. Re-check the missing songs against them now?`))recheckMissing()},400)}}}
     if(sc.error)toast('Scan error: '+sc.error,true);
     S.roots=st.roots;S.exportDir=st.export_dir;
     if(!st.roots.length&&!$('#dlgFolders').open)openFolders();
@@ -411,6 +413,22 @@ function renderRequests(){
   if(S.sel>=0&&S.requests[S.sel])$('#btnToggleMissing').textContent=isMissing(S.requests[S.sel])?'Not missing — I have it':'Mark as missing';
 }
 const missingLines=()=>S.requests.filter(isMissing).map(r=>(r.request.artist?r.request.artist+' - ':'')+r.request.title);
+async function recheckMissing(){
+  const miss=S.requests.map((r,i)=>[r,i]).filter(([r])=>isMissing(r)||r.status==='not_found');
+  if(!miss.length)return toast('Nothing is missing');
+  $('#btnRecheck').disabled=true;$('#btnRecheck').textContent='Checking…';
+  let found=0;
+  try{
+    for(const [r,i] of miss){
+      const res=await api.post('/api/match_one',{artist:r.request.artist,title:r.request.title,duration_ms:r.request.duration_ms,limit:12});
+      r.candidates=res.candidates;const was=r.status;r.status=res.status;
+      if(r.status==='exact'||r.status==='likely'){if(was!==r.status)found++;r.forceMissing=undefined}
+    }
+    renderRequests();if(S.sel>=0)selectRequest(S.sel);markDirty();
+    toast(found?`${found} of the missing songs are now in your library — they've moved to Found`:'No new matches for the missing songs yet. Did the rescan finish?');
+  }catch(e){toast(e.message,true)}finally{$('#btnRecheck').disabled=false;$('#btnRecheck').textContent='Re-check missing'}
+}
+$('#btnRecheck').onclick=recheckMissing;
 $('#btnToggleMissing').onclick=()=>{const r=S.requests[S.sel];if(!r)return;r.forceMissing=isMissing(r)?false:true;renderRequests();markDirty();toast(isMissing(r)?'Marked as missing':'Marked as not missing')};
 async function copyText(t){try{await navigator.clipboard.writeText(t)}catch(e){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}}
 $('#btnCopyMissing').onclick=async()=>{const l=missingLines();await copyText(l.join('\n'));toast(`Copied ${l.length} missing songs to the clipboard`)};
