@@ -266,6 +266,10 @@ def make_handler(app: App):
                 if p == "/api/match":
                     app.ensure_lib_fresh()
                     reqs = parse_playlist_text(body.get("text", ""))
+                    if body.get("swap"):   # list was written "Title - Artist"
+                        for r in reqs:
+                            if r["artist"]:
+                                r["artist"], r["title"] = r["title"], r["artist"]
                     out = []
                     for r in reqs:
                         res = app.lib.match(r["artist"], r["title"], r.get("duration_ms"), limit=int(body.get("limit", 10)))

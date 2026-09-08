@@ -336,7 +336,11 @@ $('#btnScanNow').onclick=async()=>{if(!(S.roots||[]).length)return toast('Add a 
 $('#btnMatch').onclick=async()=>{
   const text=$('#pltext').value;if(!text.trim())return;
   $('#btnMatch').disabled=true;$('#btnMatch').textContent='Matching…';
-  try{const j=await api.post('/api/match',{text,limit:12});
+  try{let j=await api.post('/api/match',{text,limit:12});
+    const withA=j.results.filter(r=>r.request.artist&&r.candidates.length);
+    if(withA.length>=3&&withA.filter(r=>r.candidates[0].swapped).length>withA.length/2){
+      j=await api.post('/api/match',{text,limit:12,swap:true});S.swapped=true;toast('Your list looks like "Title - Artist" — flipped it round')}
+    else S.swapped=false;
     const prevFlags=new Map(S.requests.map(r=>[(r.request.artist+'|'+r.request.title).toLowerCase(),r.forceMissing]));
     S.requests=j.results.map(r=>({...r,chosen:[],forceMissing:prevFlags.get((r.request.artist+'|'+r.request.title).toLowerCase())}));
     if(S.spTracks){const byKey=new Map(S.spTracks.map(t=>[(t.artist+'|'+t.title).toLowerCase(),t.uri]));S.requests.forEach(r=>{const u=byKey.get((r.request.artist+'|'+r.request.title).toLowerCase());if(u)r.request.uri=u})}
@@ -365,14 +369,19 @@ const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.c
 // for a *different* request shows as "in playlist" rather than "added", so counts stay honest.
 function syncChosen(){
   const byId=new Map(S.playlist.map(t=>[t.id,t]));
+  const allKeys=new Set(S.requests.map(reqKey));
+  // entries whose owner request no longer exists (list was edited) become claimable again
+  S.playlist.forEach(e=>{if(e.reqKey&&!allKeys.has(e.reqKey))e.reqKey=null});
   const seenKeys=new Set();
-  S.requests.forEach(r=>{const k=reqKey(r);r.duplicate=seenKeys.has(k);seenKeys.add(k);
-    const cands=(r.candidates||[]).map(c=>c.track.id).filter(id=>byId.has(id));
-    r.chosen=r.duplicate?[]:cands.filter(id=>{const e=byId.get(id);return !e.reqKey||e.reqKey===k});
-    r.inPlaylist=!r.chosen.length&&cands.length>0;
-    if(!r.chosen.length&&cands.length&&!r.duplicate){ // legacy entries without reqKey: claim the first unclaimed
-      const e=byId.get(cands[0]);if(e&&!e.reqKey){e.reqKey=k;r.chosen=[e.id];r.inPlaylist=false}}
-  });
+  S.requests.forEach(r=>{const k=reqKey(r);r.duplicate=seenKeys.has(k);seenKeys.add(k);r.chosen=[];r.inPlaylist=false});
+  // pass 1: entries already owned by this request
+  S.requests.forEach(r=>{if(r.duplicate)return;const k=reqKey(r);
+    r.chosen=(r.candidates||[]).map(c=>c.track.id).filter(id=>byId.has(id)&&byId.get(id).reqKey===k)});
+  // pass 2: unowned entries (saved before ownership existed) — first request that wants one claims it, once
+  S.requests.forEach(r=>{if(r.duplicate||r.chosen.length)return;const k=reqKey(r);
+    for(const c of (r.candidates||[])){const e=byId.get(c.track.id);if(e&&!e.reqKey){e.reqKey=k;r.chosen=[e.id];break}}});
+  // anything else in the playlist that this request could have used → "in playlist"
+  S.requests.forEach(r=>{if(r.chosen.length)return;r.inPlaylist=(r.candidates||[]).some(c=>byId.has(c.track.id))});
 }
 const visibleIdx=()=>S.requests.map((r,i)=>FILTERS[S.filter](r)?i:-1).filter(i=>i>=0);
 document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.f;renderRequests();const v=visibleIdx();if(v.length&&!v.includes(S.sel))selectRequest(v[0])});
