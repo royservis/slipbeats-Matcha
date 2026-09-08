@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install build deps
-        run: python -m pip install --upgrade pip mutagen rapidfuzz pywebview pyinstaller pillow
+        run: python -m pip install --upgrade pip mutagen rapidfuzz pywebview pyinstaller pillow certifi
       - name: Make icon
         run: |
           mkdir -p assets/Slipbeats.iconset

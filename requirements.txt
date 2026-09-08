@@ -1,2 +1,3 @@
 mutagen>=1.47
 rapidfuzz>=3.0
+certifi

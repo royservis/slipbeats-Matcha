@@ -486,6 +486,8 @@ $('#btnSpotify').onclick=openSpotify;$('#btnCloseSpotify').onclick=()=>$('#dlgSp
 $('#btnCopyRedirect').onclick=()=>{copyText($('#spredirect').textContent);toast('Redirect URI copied')};
 $('#btnSpSaveId').onclick=async()=>{try{await api.post('/api/spotify/config',{client_id:$('#spclient').value});toast('Client ID saved');openSpotify()}catch(e){toast(e.message,true)}};
 $('#btnSpConnect').onclick=async()=>{const cid=$('#spclient').value.trim();if(!cid)return toast('Paste the Client ID first',true);
+  if($('#btnSpConnect').disabled)return;$('#btnSpConnect').disabled=true;setTimeout(()=>$('#btnSpConnect').disabled=false,15000);
+  if(location.port&&location.port!=='8765')toast(`Slipbeats is running on port ${location.port}, not 8765 — another copy is probably open. Quit all copies and relaunch, or the Spotify redirect will not match.`,true);
   try{if(cid!==(S.sp?.client_id||''))await api.post('/api/spotify/config',{client_id:cid});await api.post('/api/spotify/login',{});toast('Approve Slipbeats in the browser tab that just opened, then come back here');
     let tries=0;const poll=setInterval(async()=>{const st=await spStatus();if(st.connected||++tries>90){clearInterval(poll);if(st.connected){toast(`Spotify connected as ${st.user?.name||''}`);openSpotify()}}},2000);
   }catch(e){toast(e.message,true)}};

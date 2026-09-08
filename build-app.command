@@ -40,7 +40,7 @@ echo "Using $($PY --version) at $(command -v $PY)"
 if [ ! -d .venv ]; then "$PY" -m venv .venv; fi
 source .venv/bin/activate
 python -m pip install --upgrade pip -q
-python -m pip install -q mutagen rapidfuzz pywebview pyinstaller pillow
+python -m pip install -q mutagen rapidfuzz pywebview pyinstaller pillow certifi
 
 # 3. App icon (.icns from assets/icon.png)
 if [ ! -f assets/Slipbeats.icns ]; then

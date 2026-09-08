@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import secrets
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -28,6 +29,23 @@ REDIRECT_PATH = "/spotify/callback"
 
 class SpotifyError(Exception):
     pass
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """python.org builds of Python on macOS ship without root certificates wired into urllib,
+    so HTTPS fails with CERTIFICATE_VERIFY_FAILED. Prefer certifi's bundle when available."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+SSL_CTX = _ssl_context()
+
+
+def _open(req, timeout=30):
+    return urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX)
 
 
 class Spotify:
@@ -79,7 +97,9 @@ class Spotify:
 
     def handle_callback(self, code: str, state: str, port: int = REDIRECT_PORT):
         if not self._verifier or state != self._state:
-            raise SpotifyError("Login session mismatch — try Connect again")
+            raise SpotifyError("Login session mismatch. Usually another copy of Slipbeats (e.g. the browser version from "
+                               "run.command, or an old window) is running and received the login instead. Quit every "
+                               "Slipbeats, open just one, and press Connect once.")
         body = dict(grant_type="authorization_code", code=code, redirect_uri=self.redirect_uri(port),
                     client_id=self.client_id, code_verifier=self._verifier)
         tok = self._post_form(TOKEN_URL, body)
@@ -109,10 +129,12 @@ class Spotify:
         req = urllib.request.Request(url, data=urllib.parse.urlencode(form).encode(),
                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _open(req) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             raise SpotifyError(f"Spotify auth failed ({e.code}): {e.read().decode()[:300]}")
+        except urllib.error.URLError as e:
+            raise SpotifyError(f"Could not reach Spotify: {e.reason}")
 
     # ----- API -----
     def api(self, method: str, path: str, params: dict | None = None, body: dict | None = None) -> dict:
@@ -126,7 +148,7 @@ class Spotify:
                                      headers={"Authorization": f"Bearer {self.data['access_token']}",
                                               "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _open(req) as r:
                 raw = r.read().decode()
                 return json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as e:
