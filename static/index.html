@@ -143,6 +143,8 @@ dialog h2{margin:0 0 10px;font-size:16px}
   <button id="btnScan" title="Look for new, changed or deleted files">Rescan</button>
   <button id="btnFolders">Folders…</button>
   <button id="btnSpotify" title="Connect Spotify to import playlist links and create playlists">Spotify…</button>
+  <button id="btnUpdateAvail" class="primary" style="display:none">Update available</button>
+  <button id="btnAbout" class="ghost" title="Version and updates">v?</button>
 </header>
 
 <main>
@@ -225,6 +227,18 @@ Everywhere by Fleetwood Mac
 
 <audio id="audio" preload="none"></audio>
 <div class="toast" id="toast"></div>
+
+<dialog id="dlgAbout">
+  <h2>Slipbeats <span id="abVersion" class="hint"></span></h2>
+  <div id="upState" class="hint" style="min-height:20px"></div>
+  <div id="upNotes" class="hint" style="white-space:pre-wrap;max-height:160px;overflow:auto;margin-top:6px;display:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px"></div>
+  <div class="bar" id="upBar" style="width:100%;margin-top:10px"><i></i></div>
+  <details id="upSetup" style="margin-top:12px"><summary class="hint">Update source (GitHub)</summary>
+    <div class="hint" style="margin-top:6px">Updates come from the GitHub Releases of your repo. For a private repo, create a fine-grained token at <b>github.com/settings/personal-access-tokens</b> → Generate new token → Repository access: <i>only this repo</i> → Permissions → Contents: <b>Read-only</b>. Paste it here once.</div>
+    <div class="row"><input id="upRepo" placeholder="owner/slipbeats-matcha" style="flex:.7"><input id="upToken" placeholder="github_pat_… (leave blank to keep the saved one)" type="password"><button id="btnUpSave">Save</button></div>
+  </details>
+  <div class="row" style="justify-content:flex-end;margin-top:16px"><button class="ghost" id="btnCloseAbout">Close</button><span style="flex:1"></span><button id="btnUpCheck">Check for updates</button><button class="primary" id="btnUpInstall" style="display:none">Update &amp; restart</button></div>
+</dialog>
 
 <dialog id="dlgSpotify">
   <h2>Spotify</h2>
@@ -496,6 +510,35 @@ $('#plsaved').onchange=async e=>{const id=e.target.value;e.target.value='';if(!i
   }catch(e){toast(e.message,true)}};
 $('#btnDeleteList').onclick=async()=>{if(!S.playlistId)return newList();if(!confirm(`Delete "${$('#plname').value}" from saved playlists?`))return;try{await api.post('/api/playlists/delete',{id:S.playlistId});S.playlistId=null;newList();loadSavedList();toast('Deleted')}catch(e){toast(e.message,true)}};
 
+// ---------------- updates ----------------
+let UP={};
+async function upStatus(){try{UP=await api.get('/api/update/status')}catch(e){UP={}}return UP}
+function renderUpdate(){
+  $('#abVersion').textContent='v'+(UP.version||'?');$('#btnAbout').textContent='v'+(UP.version||'?');
+  const l=UP.latest;const st=$('#upState'),notes=$('#upNotes'),inst=$('#btnUpInstall'),bar=$('#upBar');
+  $('#upRepo').value=UP.repo||'';$('#upSetup').open=!UP.repo;
+  $('#btnUpdateAvail').style.display=(l&&l.newer&&UP.phase==='idle')?'':'none';
+  bar.style.display=(UP.phase==='downloading'||UP.phase==='installing')?'block':'none';bar.firstElementChild.style.width=(UP.progress||0)+'%';
+  if(UP.phase==='downloading')st.textContent=`Downloading v${l?.version}… ${UP.progress||0}%`;
+  else if(UP.phase==='installing')st.textContent='Installing…';
+  else if(UP.phase==='relaunching')st.textContent='Relaunching Slipbeats — this window will close.';
+  else if(UP.phase==='error')st.innerHTML=`<span style="color:var(--bad)">${esc(UP.message)}</span>`;
+  else if(!UP.repo)st.textContent='Set the GitHub repo below to enable update checks.';
+  else if(!l)st.textContent=UP.last_check?`Last checked ${new Date(UP.last_check*1000).toLocaleString('en-GB')}.`:'Not checked yet.';
+  else if(l.newer)st.innerHTML=`<b style="color:var(--ok)">v${esc(l.version)} is available</b> (you have v${esc(UP.version)})${l.published?' · '+new Date(l.published).toLocaleDateString('en-GB'):''}${!UP.can_install?' — running from source: use git pull':''}`;
+  else st.textContent=`You're on the latest version (v${UP.version}).`;
+  notes.style.display=(l&&l.newer&&l.notes)?'block':'none';notes.textContent=l?.notes||'';
+  inst.style.display=(l&&l.newer&&UP.can_install&&l.asset_url&&(UP.phase==='idle'||UP.phase==='error'))?'':'none';
+}
+async function openAbout(){await upStatus();renderUpdate();$('#dlgAbout').showModal()}
+$('#btnAbout').onclick=openAbout;$('#btnUpdateAvail').onclick=openAbout;$('#btnCloseAbout').onclick=()=>$('#dlgAbout').close();
+$('#btnUpSave').onclick=async()=>{try{UP=await api.post('/api/update/config',{repo:$('#upRepo').value,token:$('#upToken').value.trim()||null});$('#upToken').value='';toast('Saved');renderUpdate()}catch(e){toast(e.message,true)}};
+$('#btnUpCheck').onclick=async()=>{$('#btnUpCheck').disabled=true;try{await api.post('/api/update/check',{});await upStatus();renderUpdate()}catch(e){toast(e.message,true)}finally{$('#btnUpCheck').disabled=false}};
+$('#btnUpInstall').onclick=async()=>{if(!confirm('Download and install the update, then relaunch Slipbeats? Your work is autosaved.'))return;
+  try{await api.post('/api/update/install',{});const t=setInterval(async()=>{try{await upStatus()}catch(e){clearInterval(t);$('#upState').textContent='Relaunching…';return}renderUpdate();if(UP.phase==='error')clearInterval(t)},700)}catch(e){toast(e.message,true)}};
+// quiet daily check
+(async()=>{await upStatus();renderUpdate();if(UP.repo&&(!UP.last_check||Date.now()/1000-UP.last_check>86400)){try{await api.post('/api/update/check',{});await upStatus();renderUpdate();if(UP.latest?.newer)toast(`Slipbeats v${UP.latest.version} is available — click "Update available" in the header`)}catch(e){}}})();
+
 // ---------------- spotify ----------------
 async function spStatus(){try{return await api.get('/api/spotify/status')}catch(e){return {}}}
 async function openSpotify(){const st=await spStatus();S.sp=st;$('#spredirect').textContent=st.redirect_uri||'';$('#spclient').value=st.client_id||'';
@@ -542,7 +585,7 @@ $('#j0').onclick=()=>jump(0);$('#j45').onclick=()=>jump(45);$('#j90').onclick=()
 
 // ---------------- keyboard ----------------
 document.addEventListener('keydown',e=>{
-  const tag=(e.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea'||tag==='select'||$('#dlgFolders').open||$('#dlgSpotify').open)return;
+  const tag=(e.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea'||tag==='select'||$('#dlgFolders').open||$('#dlgSpotify').open||$('#dlgAbout').open)return;
   if(e.key===' '){e.preventDefault();$('#btnPlay').click()}
   else if(e.key==='ArrowDown'){e.preventDefault();if(S.candIdx<S.cands.length-1){S.candIdx++;highlightCand();document.querySelectorAll('.cand')[S.candIdx]?.scrollIntoView({block:'nearest'})}}
   else if(e.key==='ArrowUp'){e.preventDefault();if(S.candIdx>0){S.candIdx--;highlightCand();document.querySelectorAll('.cand')[S.candIdx]?.scrollIntoView({block:'nearest'})}}

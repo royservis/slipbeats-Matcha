@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for Slipbeats.app (macOS). Build with build-app.command.
 from PyInstaller.utils.hooks import collect_submodules
+import re
+VERSION = re.search(r'VERSION = "([^"]+)"', open("slipbeats/__init__.py").read()).group(1)
 
 a = Analysis(
     ["slipbeats_app.py"],
@@ -33,8 +35,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Slipbeats",
         "CFBundleDisplayName": "Slipbeats",
-        "CFBundleShortVersionString": "0.3.4",
-        "CFBundleVersion": "0.3.4",
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.3",
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

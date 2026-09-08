@@ -48,15 +48,18 @@ After that: paste any `open.spotify.com/playlist/…` or album link into the box
 
 Tokens live in `~/.slipbeats/spotify.json`. If the port 8765 is in use when the app starts it picks another port and the Spotify login will fail — quit whatever is using 8765 and relaunch.
 
-## Keeping it up to date across Macs
+## Updates
 
-The source of truth is this folder. The `.app` on the Mac mini is a build of it, so after any change you either rebuild on the Mini (`build-app.command` — quick after the first time) or, better, let GitHub build it:
+The version number lives in one place: `VERSION` in `slipbeats/__init__.py`. Releasing is:
 
-1. Put this folder in a GitHub repository (private is fine).
-2. `.github/workflows/build-mac.yml` is already here: every push to `main` builds `Slipbeats.app` on an Apple-silicon runner and attaches `Slipbeats-mac-arm64.zip` to the workflow run (Actions tab → the run → Artifacts). Pushing a tag like `v0.3` also creates a GitHub Release with the zip attached.
-3. On the Mini: download the zip, unzip, drag to Applications, right-click → Open the first time (locally signed, so Gatekeeper asks once). Your index, saved playlists and Spotify login live in `~/.slipbeats/` and survive replacing the app.
+1. bump `VERSION` (e.g. `0.4.1`), commit, `git push`;
+2. GitHub Actions builds `Slipbeats.app` on an Apple-silicon runner and, because the version is new, publishes a **Release** `v0.4.1` with `Slipbeats-mac-arm64.zip` attached (a push without a version bump just rebuilds).
 
-Everything user-specific is in `~/.slipbeats/` and `~/Slipbeats Playlists/`, nothing inside the app bundle, so upgrades are just a swap.
+In the app, click the version number in the header (**v0.4.0**) → **Check for updates** → **Update & restart**. It downloads the release zip, swaps `Slipbeats.app` in place, and relaunches. It also checks quietly once a day and shows an **Update available** button in the header.
+
+One-off setup, because the repo is private: in the same panel open *Update source*, enter `owner/slipbeats-matcha`, and paste a GitHub fine-grained token (github.com/settings/personal-access-tokens → Generate new token → Repository access: only this repo → Permissions → Contents: Read-only). It's stored in `~/.slipbeats/update.json`.
+
+Manual route still works: download the zip from the Release or the Actions run, unzip, drag to Applications. Your index, saved playlists and logins live in `~/.slipbeats/` and `~/Slipbeats Playlists/`, so replacing the app loses nothing.
 
 ## Command line
 

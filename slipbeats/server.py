@@ -19,6 +19,8 @@ from .indexer import Scanner, add_root, connect
 from .matcher import Library, parse_playlist_text, track_to_dict
 from .normalise import key
 from .spotify import Spotify, SpotifyError
+from .updater import UpdateError, Updater
+from . import VERSION
 
 def _static_dir() -> Path:
     # PyInstaller one-folder/one-file bundles unpack data next to sys._MEIPASS
@@ -45,6 +47,7 @@ class App:
         self.lib_loaded_at = time.time()
         self.export_dir = Path(export_dir).expanduser() if export_dir else Path.home() / "Slipbeats Playlists"
         self.spotify = Spotify(Path(db_path).parent / "spotify.json")
+        self.updater = Updater(Path(db_path).parent / "update.json")
         self.port = 8765
 
     # --- helpers -----------------------------------------------------------
@@ -141,7 +144,9 @@ def make_handler(app: App):
                     app.ensure_lib_fresh()
                     n = app.con.execute("SELECT COUNT(*) FROM tracks WHERE missing=0").fetchone()[0]
                     return self._json(dict(scan=app.scanner.status(), tracks=n, roots=app.roots(),
-                                           export_dir=str(app.export_dir)))
+                                           export_dir=str(app.export_dir), version=VERSION))
+                if p == "/api/update/status":
+                    return self._json(app.updater.status())
                 if p == "/api/search":
                     app.ensure_lib_fresh()
                     return self._json(dict(results=app.lib.search(q.get("q", ""), int(q.get("limit", 40)))))
@@ -337,6 +342,25 @@ def make_handler(app: App):
                                   {".mp3", ".m4a", ".aif", ".aiff", ".wav", ".flac"}) if base.is_dir() else 0
                     return self._json(dict(path=str(base), parent=str(base.parent) if base.parent != base else None,
                                            dirs=subs, volumes=volumes, audio_files_here=n_audio))
+                if p == "/api/update/config":
+                    app.updater.configure(body.get("repo", ""), body.get("token"))
+                    return self._json(app.updater.status())
+                if p == "/api/update/check":
+                    latest = app.updater.check()
+                    return self._json(dict(latest=latest, version=VERSION))
+                if p == "/api/update/install":
+                    up = app.updater
+                    if up.state["phase"] not in ("idle", "error"):
+                        return self._json(dict(started=False, **up.status()))
+                    def run():
+                        try:
+                            up.install()
+                            time.sleep(1.0)
+                            os._exit(0)   # the relaunch script takes over
+                        except Exception as e:
+                            up.state.update(phase="error", message=str(e))
+                    threading.Thread(target=run, daemon=True).start()
+                    return self._json(dict(started=True))
                 if p == "/api/spotify/config":
                     app.spotify.set_client_id(body.get("client_id", ""))
                     return self._json(dict(ok=True))
@@ -373,7 +397,7 @@ def make_handler(app: App):
                         os.system(f"open -R {json.dumps(str(path))}")
                     return self._json(dict(ok=True))
                 self._json(dict(error="not found"), 404)
-            except SpotifyError as e:
+            except (SpotifyError, UpdateError) as e:
                 self._json(dict(error=str(e)), 400)
             except Exception as e:
                 self._json(dict(error=repr(e)), 500)
