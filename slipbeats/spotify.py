@@ -155,10 +155,21 @@ class Spotify:
             if e.code == 401:
                 self._refresh()
                 return self.api(method, path, params, body)
-            msg = e.read().decode()[:300]
+            raw = e.read().decode()[:400]
+            try:
+                msg = json.loads(raw).get("error", {}).get("message") or raw
+            except Exception:
+                msg = raw
+            hint = ""
             if e.code == 403:
-                msg += "  (403 usually means this Spotify account isn't added as a user of your developer app, or the app's redirect URI doesn't match)"
-            raise SpotifyError(f"Spotify API {e.code}: {msg}")
+                low = msg.lower()
+                if "scope" in low:
+                    hint = "  → The login didn't include playlist permissions. Open Spotify… → Disconnect → Connect again and approve everything."
+                elif "not registered" in low or "user" in low:
+                    hint = "  → In development mode Spotify only allows accounts listed under the app's User Management (developer dashboard → your app → Settings → User Management). Add this account's email there."
+                else:
+                    hint = "  → Development-mode apps may need the account added under User Management in the developer dashboard."
+            raise SpotifyError(f"Spotify API {e.code} on {method} {path}: {msg}{hint}")
         except urllib.error.URLError as e:
             raise SpotifyError(f"Network error talking to Spotify: {e.reason}")
 
@@ -228,8 +239,15 @@ class Spotify:
             uri = r.get("uri")
             hit = dict(uri=uri, title=r.get("title"), artist=r.get("artist")) if uri else self.find_track(r.get("artist", ""), r.get("title", ""))
             (found if hit else not_found).append(hit or r)
-        pl = self.api("POST", f"/users/{uid}/playlists",
-                      body=dict(name=name, public=False, description=description or "Created by Slipbeats"))
+        payload = dict(name=name, public=False, description=(description or "Created by Slipbeats")[:300])
+        try:
+            pl = self.api("POST", f"/users/{uid}/playlists", body=payload)
+        except SpotifyError as first:
+            # some accounts get 403 on the /users/{id} form; the /me form is equivalent
+            try:
+                pl = self.api("POST", "/me/playlists", body=payload)
+            except SpotifyError:
+                raise first
         uris = [f["uri"] for f in found]
         for i in range(0, len(uris), 100):
             self.api("POST", f"/playlists/{pl['id']}/tracks", body=dict(uris=uris[i:i + 100]))
