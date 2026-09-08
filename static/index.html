@@ -109,6 +109,8 @@ dialog h2{margin:0 0 10px;font-size:16px}
 .chips{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .chip{padding:3px 10px;border-radius:999px;font-size:12px;color:var(--muted)}
 .chip b{font-weight:500;opacity:.7;margin-left:3px}
+.req .cp{padding:1px 7px;font-size:13px;opacity:0}
+.req:hover .cp,.req.sel .cp{opacity:1}
 .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .chip.on b{opacity:.8}
 .missingbar{width:100%;display:flex;gap:6px;align-items:center;padding-top:6px;border-top:1px dashed var(--line);margin-top:4px}
@@ -147,7 +149,7 @@ dialog h2{margin:0 0 10px;font-size:16px}
     <div class="chips" id="filters" style="display:none">
       <button class="chip on" data-f="all">All <b></b></button>
       <button class="chip" data-f="found">Found <b></b></button>
-      <button class="chip" data-f="missing">Missing <b></b></button>
+      <button class="chip" data-f="missing" title="Not found, plus weak 'possible' matches you haven't added">Missing <b></b></button>
       <button class="chip" data-f="added">Added <b></b></button>
       <button class="chip" data-f="todo">To review <b></b></button>
     </div>
@@ -186,7 +188,7 @@ Everywhere by Fleetwood Mac
 
   <!-- Candidates -->
   <section class="col">
-    <div class="head"><span id="candtitle">Versions in your library</span><span class="sp"></span><span class="hint">↑↓ browse · <kbd>space</kbd> play · <kbd>enter</kbd> add</span></div>
+    <div class="head"><span id="candtitle">Versions in your library</span><span class="sp"></span><button class="ghost" id="btnToggleMissing" style="display:none;text-transform:none;letter-spacing:0;font-weight:500">Mark as missing</button><span class="hint">↑↓ browse · <kbd>space</kbd> play · <kbd>enter</kbd> add</span></div>
     <div class="searchbox"><input id="search" placeholder="Search the whole library… (artist, title, remix)"><button id="btnSearch">Search</button></div>
     <div class="body" id="candlist"><div class="pad hint">Match a list on the left, or search above, to see candidate versions here.</div></div>
   </section>
@@ -318,7 +320,8 @@ $('#btnMatch').onclick=async()=>{
   const text=$('#pltext').value;if(!text.trim())return;
   $('#btnMatch').disabled=true;$('#btnMatch').textContent='Matching…';
   try{const j=await api.post('/api/match',{text,limit:12});
-    S.requests=j.results.map(r=>({...r,chosen:[]}));
+    const prevFlags=new Map(S.requests.map(r=>[(r.request.artist+'|'+r.request.title).toLowerCase(),r.forceMissing]));
+    S.requests=j.results.map(r=>({...r,chosen:[],forceMissing:prevFlags.get((r.request.artist+'|'+r.request.title).toLowerCase())}));
     if(S.spTracks){const byKey=new Map(S.spTracks.map(t=>[(t.artist+'|'+t.title).toLowerCase(),t.uri]));S.requests.forEach(r=>{const u=byKey.get((r.request.artist+'|'+r.request.title).toLowerCase());if(u)r.request.uri=u})}
     // pre-select remembered preferences
     S.requests.forEach(r=>{const k=r.candidates.findIndex(c=>c.track.id===r.preferred_track_id);if(k>0){const [c]=r.candidates.splice(k,1);r.candidates.unshift(c)}if(k>=0){r.candidates[0].notes=[...(r.candidates[0].notes||[]),'your usual pick']}});
@@ -335,10 +338,16 @@ $('#btnNewList').onclick=()=>{if(S.playlist.length||S.requests.length){if(!confi
 $('#btnEditList').onclick=()=>{$('#inputpane').style.display='block';$('#inputpane').scrollIntoView({block:'start'});$('#pltext').focus()};
 $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='exact'&&!r.chosen.length){const c=r.candidates[0];if(addToPlaylist(c.track,i,true))n++}});renderRequests();renderPlaylist();renderCands();markDirty();toast(`Added ${n} tracks`)};
 
-const FILTERS={all:r=>true,found:r=>r.status!=='not_found',missing:r=>r.status==='not_found',added:r=>r.chosen.length>0,todo:r=>r.status!=='not_found'&&!r.chosen.length};
+// A song counts as missing when nothing was found, or only a weak "possible" was found and you didn't add it,
+// unless you've overridden it with Mark as missing / not missing.
+const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&(r.status==='not_found'||r.status==='possible'));
+const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length};
+// keep r.chosen in step with what is really in the playlist (survives loading and re-matching)
+function syncChosen(){const ids=new Set(S.playlist.map(t=>t.id));S.requests.forEach(r=>{r.chosen=(r.candidates||[]).map(c=>c.track.id).filter(id=>ids.has(id))})}
 const visibleIdx=()=>S.requests.map((r,i)=>FILTERS[S.filter](r)?i:-1).filter(i=>i>=0);
 document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.f;renderRequests();const v=visibleIdx();if(v.length&&!v.includes(S.sel))selectRequest(v[0])});
 function renderRequests(){
+  syncChosen();
   const el=$('#reqlist');el.innerHTML='';
   document.querySelectorAll('.chip').forEach(c=>{c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=S.requests.filter(FILTERS[c.dataset.f]).length});
   const vis=visibleIdx();
@@ -346,20 +355,26 @@ function renderRequests(){
   vis.forEach(i=>{const r=S.requests[i];
     const d=document.createElement('div');d.className='req'+(i===S.sel?' sel':'');
     const a=r.request.artist,t=r.request.title;
-    const pill=r.chosen.length?`<span class="pill chosen">${r.chosen.length>1?r.chosen.length+' added':'added'}</span>`:`<span class="pill ${r.status}">${({exact:'exact',likely:'likely',possible:'possible',not_found:'not found'})[r.status]||r.status}</span>`;
-    d.innerHTML=`<div class="txt"><div class="t">${esc(t)}</div><div class="a">${esc(a||'(no artist given)')}</div></div><span class="count">${r.candidates.filter(c=>c.tier!=='weak').length||''}</span>${pill}`;
+    const lbl=({exact:'exact',likely:'likely',possible:'possible',not_found:'not found'})[r.status]||r.status;
+    const pill=r.chosen.length?`<span class="pill chosen">${r.chosen.length>1?r.chosen.length+' added':'added'}</span>`
+      :isMissing(r)?`<span class="pill not_found" title="${r.status==='possible'?'Only a weak match — counted as missing':''}">${r.status==='possible'?'possible · missing':'missing'}</span>`
+      :`<span class="pill ${r.status}">${lbl}${r.forceMissing===false?' · have it':''}</span>`;
+    d.innerHTML=`<div class="txt"><div class="t">${esc(t)}</div><div class="a">${esc(a||'(no artist given)')}</div></div><button class="ghost cp" title="Copy “${esc(a?a+' - ':'')}${esc(t)}”">⧉</button><span class="count">${r.candidates.filter(c=>c.tier!=='weak').length||''}</span>${pill}`;
+    d.querySelector('.cp').onclick=async e=>{e.stopPropagation();const line=(a?a+' - ':'')+t;await copyText(line);toast(`Copied: ${line}`)};
     d.onclick=()=>selectRequest(i);el.appendChild(d)});
-  const found=S.requests.filter(r=>r.status!=='not_found').length,chosen=S.requests.filter(r=>r.chosen.length).length;
+  const missing=S.requests.filter(isMissing).length;
   $('#reqsummary').textContent=S.requests.length?`${S.requests.length} songs`:'';
-  $('#reqstats').textContent=S.requests.length?`${found} found · ${S.requests.length-found} missing · ${chosen} added`:'';
-  $('#missingbar').style.display=(S.requests.length-found)?'flex':'none';
+  $('#missingbar').style.display=missing?'flex':'none';
+  $('#btnToggleMissing').style.display=(S.candMode==='match'&&S.sel>=0)?'':'none';
+  if(S.sel>=0&&S.requests[S.sel])$('#btnToggleMissing').textContent=isMissing(S.requests[S.sel])?'Not missing — I have it':'Mark as missing';
 }
-const missingLines=()=>S.requests.filter(r=>r.status==='not_found').map(r=>(r.request.artist?r.request.artist+' - ':'')+r.request.title);
+const missingLines=()=>S.requests.filter(isMissing).map(r=>(r.request.artist?r.request.artist+' - ':'')+r.request.title);
+$('#btnToggleMissing').onclick=()=>{const r=S.requests[S.sel];if(!r)return;r.forceMissing=isMissing(r)?false:true;renderRequests();markDirty();toast(isMissing(r)?'Marked as missing':'Marked as not missing')};
 async function copyText(t){try{await navigator.clipboard.writeText(t)}catch(e){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}}
 $('#btnCopyMissing').onclick=async()=>{const l=missingLines();await copyText(l.join('\n'));toast(`Copied ${l.length} missing songs to the clipboard`)};
 $('#btnSaveMissing').onclick=async()=>{const l=missingLines();try{const j=await api.post('/api/save_text',{name:($('#plname').value.trim()||'Slipbeats')+' - missing',text:l.join('\n')+'\n'});toast(`Saved ${l.length} missing songs → ${j.written}`)}catch(e){toast(e.message,true)}};
 $('#btnSpMissing').onclick=async()=>{
-  const miss=S.requests.filter(r=>r.status==='not_found');if(!miss.length)return;
+  const miss=S.requests.filter(isMissing);if(!miss.length)return;
   const st=await spStatus();if(!st.connected){openSpotify();return toast('Connect Spotify first (one-off setup)',true)}
   const name=($('#plname').value.trim()||'Slipbeats')+' — missing';
   if(!confirm(`Create a private Spotify playlist "${name}" with ${miss.length} songs?`))return;
@@ -406,7 +421,7 @@ function renderCands(){
   highlightCand();
 }
 function highlightCand(){document.querySelectorAll('.cand').forEach((d,i)=>d.style.outline=i===S.candIdx?'1px solid var(--accent)':'none')}
-async function doSearch(){const q=$('#search').value.trim();if(!q)return;try{const j=await api.get('/api/search?q='+encodeURIComponent(q));S.candMode='search';S.cands=j.results.map(r=>({track:r.track,score:r.score,tier:null,notes:[]}));S.candIdx=S.cands.length?0:-1;$('#candtitle').textContent=`Search: ${q}`;renderCands()}catch(e){toast(e.message,true)}}
+async function doSearch(){const q=$('#search').value.trim();if(!q)return;try{const j=await api.get('/api/search?q='+encodeURIComponent(q));S.candMode='search';$('#btnToggleMissing').style.display='none';S.cands=j.results.map(r=>({track:r.track,score:r.score,tier:null,notes:[]}));S.candIdx=S.cands.length?0:-1;$('#candtitle').textContent=`Search: ${q}`;renderCands()}catch(e){toast(e.message,true)}}
 $('#btnSearch').onclick=doSearch;$('#search').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
 
 // ---------------- playlist ----------------
