@@ -33,8 +33,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Slipbeats",
         "CFBundleDisplayName": "Slipbeats",
-        "CFBundleShortVersionString": "0.3.2",
-        "CFBundleVersion": "0.3.2",
+        "CFBundleShortVersionString": "0.3.4",
+        "CFBundleVersion": "0.3.4",
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.3",
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},

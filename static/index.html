@@ -50,6 +50,7 @@ main{display:grid;grid-template-columns:minmax(300px,1.05fr) minmax(360px,1.6fr)
 .pill.possible{background:#20264a;color:var(--maybe);border-color:#2e3770}
 .pill.not_found,.pill.weak{background:#3a1b1b;color:var(--bad);border-color:#5a2a2a}
 .pill.chosen{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.pill.inpl{background:#2a2412;color:#c9a35a;border-color:#4a3d1c}
 .count{font-family:var(--mono);font-size:11px;color:var(--muted)}
 /* candidates */
 .cand{display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -109,6 +110,8 @@ dialog h2{margin:0 0 10px;font-size:16px}
 .chips{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .chip{padding:3px 10px;border-radius:999px;font-size:12px;color:var(--muted)}
 .chip b{font-weight:500;opacity:.7;margin-left:3px}
+.pill.flip{cursor:pointer}
+.pill.flip:hover{filter:brightness(1.25);outline:1px solid currentColor}
 .req .cp{padding:1px 7px;font-size:13px;opacity:0}
 .req:hover .cp,.req.sel .cp{opacity:1}
 .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -340,10 +343,23 @@ $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='
 
 // A song counts as missing when nothing was found, or only a weak "possible" was found and you didn't add it,
 // unless you've overridden it with Mark as missing / not missing.
-const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&(r.status==='not_found'||r.status==='possible'));
-const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length};
-// keep r.chosen in step with what is really in the playlist (survives loading and re-matching)
-function syncChosen(){const ids=new Set(S.playlist.map(t=>t.id));S.requests.forEach(r=>{r.chosen=(r.candidates||[]).map(c=>c.track.id).filter(id=>ids.has(id))})}
+const reqKey=r=>((r.request.artist||'')+'|'+(r.request.title||'')).toLowerCase().replace(/\s+/g,' ').trim();
+const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&!r.inPlaylist&&(r.status==='not_found'||r.status==='possible'));
+const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist};
+// keep r.chosen in step with what is really in the playlist (survives loading and re-matching).
+// A playlist entry remembers which request it was added for (reqKey); a file that is in the playlist
+// for a *different* request shows as "in playlist" rather than "added", so counts stay honest.
+function syncChosen(){
+  const byId=new Map(S.playlist.map(t=>[t.id,t]));
+  const seenKeys=new Set();
+  S.requests.forEach(r=>{const k=reqKey(r);r.duplicate=seenKeys.has(k);seenKeys.add(k);
+    const cands=(r.candidates||[]).map(c=>c.track.id).filter(id=>byId.has(id));
+    r.chosen=r.duplicate?[]:cands.filter(id=>{const e=byId.get(id);return !e.reqKey||e.reqKey===k});
+    r.inPlaylist=!r.chosen.length&&cands.length>0;
+    if(!r.chosen.length&&cands.length&&!r.duplicate){ // legacy entries without reqKey: claim the first unclaimed
+      const e=byId.get(cands[0]);if(e&&!e.reqKey){e.reqKey=k;r.chosen=[e.id];r.inPlaylist=false}}
+  });
+}
 const visibleIdx=()=>S.requests.map((r,i)=>FILTERS[S.filter](r)?i:-1).filter(i=>i>=0);
 document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.f;renderRequests();const v=visibleIdx();if(v.length&&!v.includes(S.sel))selectRequest(v[0])});
 function renderRequests(){
@@ -357,13 +373,16 @@ function renderRequests(){
     const a=r.request.artist,t=r.request.title;
     const lbl=({exact:'exact',likely:'likely',possible:'possible',not_found:'not found'})[r.status]||r.status;
     const pill=r.chosen.length?`<span class="pill chosen">${r.chosen.length>1?r.chosen.length+' added':'added'}</span>`
-      :isMissing(r)?`<span class="pill not_found" title="${r.status==='possible'?'Only a weak match — counted as missing':''}">${r.status==='possible'?'possible · missing':'missing'}</span>`
-      :`<span class="pill ${r.status}">${lbl}${r.forceMissing===false?' · have it':''}</span>`;
+      :r.inPlaylist?`<span class="pill inpl" title="${r.duplicate?'This song is listed twice — the file is already in the playlist':'The matching file is already in the playlist for another song'}">${r.duplicate?'duplicate · in playlist':'in playlist'}</span>`
+      :isMissing(r)?`<span class="pill not_found flip" title="Click to mark as NOT missing">${r.status==='possible'?'possible · missing':r.status==='not_found'?'missing':lbl+' · missing'}</span>`
+      :`<span class="pill ${r.status} flip" title="Wrong match? Click to mark this song as missing">${lbl}${r.forceMissing===false?' · have it':''}</span>`;
     d.innerHTML=`<div class="txt"><div class="t">${esc(t)}</div><div class="a">${esc(a||'(no artist given)')}</div></div><button class="ghost cp" title="Copy “${esc(a?a+' - ':'')}${esc(t)}”">⧉</button><span class="count">${r.candidates.filter(c=>c.tier!=='weak').length||''}</span>${pill}`;
     d.querySelector('.cp').onclick=async e=>{e.stopPropagation();const line=(a?a+' - ':'')+t;await copyText(line);toast(`Copied: ${line}`)};
+    const fp=d.querySelector('.pill.flip');if(fp)fp.onclick=e=>{e.stopPropagation();r.forceMissing=isMissing(r)?false:true;renderRequests();markDirty();toast(isMissing(r)?`"${t}" marked as missing`:`"${t}" marked as not missing`)};
     d.onclick=()=>selectRequest(i);el.appendChild(d)});
   const missing=S.requests.filter(isMissing).length;
-  $('#reqsummary').textContent=S.requests.length?`${S.requests.length} songs`:'';
+  const dup=S.requests.filter(r=>r.duplicate).length;
+  $('#reqsummary').textContent=S.requests.length?`${S.requests.length} songs${dup?` · ${dup} duplicate${dup>1?'s':''}`:''}`:'';
   $('#missingbar').style.display=missing?'flex':'none';
   $('#btnToggleMissing').style.display=(S.candMode==='match'&&S.sel>=0)?'':'none';
   if(S.sel>=0&&S.requests[S.sel])$('#btnToggleMissing').textContent=isMissing(S.requests[S.sel])?'Not missing — I have it':'Mark as missing';
@@ -427,7 +446,7 @@ $('#btnSearch').onclick=doSearch;$('#search').addEventListener('keydown',e=>{if(
 // ---------------- playlist ----------------
 function addToPlaylist(t,reqIdx,quiet){
   if(trackById(t.id)){if(!quiet)toast('Already in the playlist');return false}
-  S.playlist.push({...t,reqIdx});
+  S.playlist.push({...t,reqIdx,reqKey:(reqIdx>=0&&S.requests[reqIdx])?reqKey(S.requests[reqIdx]):null});
   if(reqIdx>=0&&S.requests[reqIdx]){const r=S.requests[reqIdx];if(!r.chosen.includes(t.id))r.chosen.push(t.id);
     api.post('/api/choose',{artist:r.request.artist,title:r.request.title,track_id:t.id}).catch(()=>{})}
   return true;
