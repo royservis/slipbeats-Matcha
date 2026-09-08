@@ -193,13 +193,18 @@ class Spotify:
         kind, sid = p
         tracks = []
         if kind == "playlist":
-            meta = self.api("GET", f"/playlists/{sid}", params={"fields": "name,owner(display_name),tracks.total"})
+            meta = self.api("GET", f"/playlists/{sid}", params={"fields": "name,owner(display_name)"})
             name = meta.get("name", "Spotify playlist")
-            page = self.api("GET", f"/playlists/{sid}/tracks",
-                            params={"limit": 100, "fields": "next,items(track(name,artists(name),duration_ms,uri))"})
+            # Spotify's 2026 API: /playlists/{id}/items with items[].item (was /tracks with items[].track)
+            try:
+                page = self.api("GET", f"/playlists/{sid}/items",
+                                params={"limit": 100, "fields": "next,items(item(name,artists(name),duration_ms,uri))"})
+            except SpotifyError:
+                page = self.api("GET", f"/playlists/{sid}/tracks",
+                                params={"limit": 100, "fields": "next,items(track(name,artists(name),duration_ms,uri))"})
             while True:
                 for it in page.get("items", []):
-                    t = it.get("track") or {}
+                    t = it.get("item") or it.get("track") or {}
                     if t.get("name"):
                         tracks.append(dict(title=t["name"], artist=", ".join(a["name"] for a in t.get("artists", [])),
                                            duration_ms=t.get("duration_ms"), uri=t.get("uri")))
@@ -240,16 +245,23 @@ class Spotify:
             hit = dict(uri=uri, title=r.get("title"), artist=r.get("artist")) if uri else self.find_track(r.get("artist", ""), r.get("title", ""))
             (found if hit else not_found).append(hit or r)
         payload = dict(name=name, public=False, description=(description or "Created by Slipbeats")[:300])
+        # Spotify's 2026 API: POST /me/playlists (the /users/{id}/playlists form now returns 403 for dev-mode apps)
         try:
-            pl = self.api("POST", f"/users/{uid}/playlists", body=payload)
+            pl = self.api("POST", "/me/playlists", body=payload)
         except SpotifyError as first:
-            # some accounts get 403 on the /users/{id} form; the /me form is equivalent
             try:
-                pl = self.api("POST", "/me/playlists", body=payload)
+                pl = self.api("POST", f"/users/{uid}/playlists", body=payload)
             except SpotifyError:
                 raise first
         uris = [f["uri"] for f in found]
         for i in range(0, len(uris), 100):
-            self.api("POST", f"/playlists/{pl['id']}/tracks", body=dict(uris=uris[i:i + 100]))
+            chunk = dict(uris=uris[i:i + 100])
+            try:
+                self.api("POST", f"/playlists/{pl['id']}/items", body=chunk)
+            except SpotifyError as first:
+                try:
+                    self.api("POST", f"/playlists/{pl['id']}/tracks", body=chunk)
+                except SpotifyError:
+                    raise first
         return dict(url=(pl.get("external_urls") or {}).get("spotify"), id=pl["id"], name=name,
                     added=found, not_found=not_found)
