@@ -157,6 +157,7 @@ dialog h2{margin:0 0 10px;font-size:16px}
       <button class="chip" data-f="missing" title="Not found, plus weak 'possible' matches you haven't added">Missing <b></b></button>
       <button class="chip" data-f="added">Added <b></b></button>
       <button class="chip" data-f="todo">To review <b></b></button>
+      <button class="chip" data-f="inpl" title="The matching file is already in the playlist for another song in the list">In playlist <b></b></button>
     </div>
     <div class="body">
       <div class="pad" id="inputpane">
@@ -365,7 +366,7 @@ $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='
 // unless you've overridden it with Mark as missing / not missing.
 const reqKey=r=>((r.request.artist||'')+'|'+(r.request.title||'')).toLowerCase().replace(/\s+/g,' ').trim();
 const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&!r.inPlaylist&&(r.status==='not_found'||r.status==='possible'));
-const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist};
+const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist,inpl:r=>r.inPlaylist};
 // keep r.chosen in step with what is really in the playlist (survives loading and re-matching).
 // A playlist entry remembers which request it was added for (reqKey); a file that is in the playlist
 // for a *different* request shows as "in playlist" rather than "added", so counts stay honest.
@@ -382,6 +383,11 @@ function syncChosen(){
   // pass 2: unowned entries (saved before ownership existed) — first request that wants one claims it, once
   S.requests.forEach(r=>{if(r.duplicate||r.chosen.length)return;const k=reqKey(r);
     for(const c of (r.candidates||[])){const e=byId.get(c.track.id);if(e&&!e.reqKey){e.reqKey=k;r.chosen=[e.id];break}}});
+  // pass 3: still nothing? claim an unowned entry whose title matches the request (added via search in older versions)
+  const norm=x=>String(x||'').toLowerCase().replace(/\(.*?\)|\[.*?\]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+  S.requests.forEach(r=>{if(r.duplicate||r.chosen.length)return;const k=reqKey(r),tt=norm(r.request.title);if(!tt)return;
+    const e=S.playlist.find(e=>!e.reqKey&&norm(e.title)===tt);
+    if(e){e.reqKey=k;r.chosen=[e.id];if(!(r.candidates||[]).some(c=>c.track.id===e.id)){r.candidates=[{track:e,score:100,tier:'exact',notes:['picked by you'],swapped:false},...(r.candidates||[])];if(r.status==='not_found'||r.status==='possible')r.status='exact'}}});
   // anything else in the playlist that this request could have used → "in playlist"
   S.requests.forEach(r=>{if(r.chosen.length)return;r.inPlaylist=(r.candidates||[]).some(c=>byId.has(c.track.id))});
 }
@@ -390,7 +396,7 @@ document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.
 function renderRequests(){
   syncChosen();
   const el=$('#reqlist');el.innerHTML='';
-  document.querySelectorAll('.chip').forEach(c=>{c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=S.requests.filter(FILTERS[c.dataset.f]).length});
+  document.querySelectorAll('.chip').forEach(c=>{const n=S.requests.filter(FILTERS[c.dataset.f]).length;c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=n;if(c.dataset.f==='inpl')c.style.display=n?'':'none'});
   const vis=visibleIdx();
   if(S.requests.length&&!vis.length)el.innerHTML='<div class="pad hint">Nothing in this filter.</div>';
   vis.forEach(i=>{const r=S.requests[i];
@@ -463,7 +469,7 @@ function candRow(c,idx){
     <div class="meta">${t.bpm?`<span>${t.bpm} BPM</span>`:''}${t.key?`<span>${esc(t.key)}</span>`:''}<span>${fmt(t.duration_ms)}</span>${dd}${t.bitrate?`<span>${t.bitrate}k ${esc((t.filename.split('.').pop()||'').toUpperCase())}</span>`:''}${t.year?`<span>${esc(t.year)}</span>`:''}${t.energy?`<span>E${t.energy}</span>`:''}${notes.length?`<span style="color:var(--accent)">${esc(notes.join(' · '))}</span>`:''}<span class="file" title="${esc(t.rel_path)}">${esc(t.filename)}</span></div></div>
     <div class="right">${c.tier?`<span class="pill ${c.tier}">${c.tier}</span>`:''}<span class="score">${c.score!=null?Math.round(c.score)+'%':''}</span><button class="add ${added?'on':''}">${added?'✓ Added':'Add'}</button></div>`;
   d.querySelector('.play').onclick=e=>{e.stopPropagation();togglePlay(t)};
-  d.querySelector('.add').onclick=e=>{e.stopPropagation();if(added)removeFromPlaylist(t.id);else addToPlaylist(t,S.candMode==='match'?S.sel:-1);renderRequests();renderPlaylist();renderCands();markDirty()};
+  d.querySelector('.add').onclick=e=>{e.stopPropagation();if(added)removeFromPlaylist(t.id);else addToPlaylist(t,S.sel);renderRequests();renderPlaylist();renderCands();markDirty()};
   d.onclick=()=>{S.candIdx=idx;highlightCand()};
   d.ondblclick=()=>togglePlay(t);
   return d;
@@ -489,6 +495,8 @@ function addToPlaylist(t,reqIdx,quiet){
   if(trackById(t.id)){if(!quiet)toast('Already in the playlist');return false}
   S.playlist.push({...t,reqIdx,reqKey:(reqIdx>=0&&S.requests[reqIdx])?reqKey(S.requests[reqIdx]):null});
   if(reqIdx>=0&&S.requests[reqIdx]){const r=S.requests[reqIdx];if(!r.chosen.includes(t.id))r.chosen.push(t.id);
+    // a file picked via search becomes a candidate of the selected song, so it stays attributed to it
+    if(!(r.candidates||[]).some(c=>c.track.id===t.id)){r.candidates=[{track:t,score:100,tier:'exact',notes:['picked by you'],swapped:false},...(r.candidates||[])];if(r.status==='not_found'||r.status==='possible')r.status='exact';r.forceMissing=undefined;if(S.candMode==='match'&&S.sel===reqIdx)S.cands=r.candidates}
     api.post('/api/choose',{artist:r.request.artist,title:r.request.title,track_id:t.id}).catch(()=>{})}
   return true;
 }
@@ -617,7 +625,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='ArrowDown'){e.preventDefault();if(S.candIdx<S.cands.length-1){S.candIdx++;highlightCand();document.querySelectorAll('.cand')[S.candIdx]?.scrollIntoView({block:'nearest'})}}
   else if(e.key==='ArrowUp'){e.preventDefault();if(S.candIdx>0){S.candIdx--;highlightCand();document.querySelectorAll('.cand')[S.candIdx]?.scrollIntoView({block:'nearest'})}}
   else if((e.key==='ArrowRight'||e.key==='ArrowLeft')&&S.candMode==='match'){e.preventDefault();const v=visibleIdx(),k=v.indexOf(S.sel);const n=v[k+(e.key==='ArrowRight'?1:-1)];if(n!=null)selectRequest(n)}
-  else if(e.key==='Enter'){const c=S.cands[S.candIdx];if(!c)return;if(trackById(c.track.id))removeFromPlaylist(c.track.id);else addToPlaylist(c.track,S.candMode==='match'?S.sel:-1);renderRequests();renderPlaylist();renderCands();markDirty()}
+  else if(e.key==='Enter'){const c=S.cands[S.candIdx];if(!c)return;if(trackById(c.track.id))removeFromPlaylist(c.track.id);else addToPlaylist(c.track,S.sel);renderRequests();renderPlaylist();renderCands();markDirty()}
   else if(e.key==='p'||e.key==='P'){const c=S.cands[S.candIdx];if(c)togglePlay(c.track)}
   else if(e.key==='ArrowLeft'||e.key==='ArrowRight'){}
   else if(e.key==='j'){audio.currentTime=Math.max(0,audio.currentTime-10)}
