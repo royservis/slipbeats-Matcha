@@ -179,6 +179,23 @@ def parse_tag_title(title: str) -> tuple[str, str, set, int | None]:
     return t, v, vt, bpm if bpm is not None else bb
 
 
+TITLE_SUFFIX_RE = re.compile(r"\s+-\s+([^-]{2,40})$")
+
+
+def split_title_suffix(title: str) -> tuple[str, str]:
+    """'Hotel California - 2013 Remaster' -> ('Hotel California', '2013 Remaster') when the suffix
+    is version-ish (remaster, radio edit, mix, live…). Otherwise the title is returned untouched."""
+    m = TITLE_SUFFIX_RE.search(title or "")
+    if not m:
+        return title, ""
+    suf = m.group(1).strip()
+    toks = tokens(suf)
+    if toks and len(toks) <= 5 and any(t in VERSION_WORDS or t.isdigit() for t in toks) \
+            and sum(1 for t in toks if t in VERSION_WORDS or t.isdigit() or t in {"european", "us", "uk", "mono", "stereo", "part"}) >= max(1, len(toks) - 1):
+        return title[: m.start()].strip(), suf
+    return title, ""
+
+
 def parse_request_line(line: str) -> tuple[str, str, int | None]:
     """Parse one line of a pasted playlist into (artist, title, duration_ms).
 

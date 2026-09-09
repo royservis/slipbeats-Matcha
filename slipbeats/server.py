@@ -80,6 +80,7 @@ class App:
                 continue
             root = rm[r["root_id"]]
             items.append(dict(
+                id=r["id"],
                 path=absolute_path(root["path"], root["export_path"], r["rel_path"]),
                 artist=r["artist"], title=(r["title"] + (f" ({r['version']})" if r["version"] else "")),
                 album=r["album"], genre=r["genre"], year=r["year"], bpm=r["bpm"], key=r["musical_key"],
@@ -274,6 +275,8 @@ def make_handler(app: App):
                     for r in reqs:
                         res = app.lib.match(r["artist"], r["title"], r.get("duration_ms"), limit=int(body.get("limit", 10)))
                         res["raw"] = r["raw"]
+                        res["request"]["type"] = r.get("type", "")
+                        res["request"]["comment"] = r.get("comment", "")
                         res["preferred_track_id"] = app.preferred(r["artist"], r["title"])
                         out.append(res)
                     return self._json(dict(results=out))
@@ -306,18 +309,28 @@ def make_handler(app: App):
                     name = re.sub(r"[^\w\s\-\.&()']+", "", body.get("name") or "Slipbeats playlist").strip() or "Slipbeats playlist"
                     ids = [int(i) for i in body.get("track_ids", [])]
                     items = app.export_items(ids)
+                    path_by_id = {it["id"]: it["path"] for it in items}
+                    groups_in = body.get("groups") or []
+                    groups = [dict(name=g["name"], paths=[path_by_id[int(t)] for t in g.get("track_ids", []) if int(t) in path_by_id])
+                              for g in groups_in if g.get("track_ids")]
                     fmt = body.get("format", "both")
                     app.export_dir.mkdir(parents=True, exist_ok=True)
                     written = []
+                    safe = lambda x: re.sub(r"[^\w\s\-\.&()']+", "", x).strip()
                     if fmt in ("m3u8", "both"):
                         f = app.export_dir / f"{name}.m3u8"
                         f.write_text(to_m3u8(name, items), encoding="utf-8")
                         written.append(str(f))
+                        by_path = {it["path"]: it for it in items}
+                        for g in groups:
+                            gf = app.export_dir / f"{name} - {safe(g['name'])}.m3u8"
+                            gf.write_text(to_m3u8(f"{name} - {g['name']}", [by_path[p] for p in g["paths"] if p in by_path]), encoding="utf-8")
+                            written.append(str(gf))
                     if fmt in ("xml", "both"):
                         f = app.export_dir / f"{name}.xml"
-                        f.write_text(to_rekordbox_xml(name, items), encoding="utf-8")
+                        f.write_text(to_rekordbox_xml(name, items, groups or None), encoding="utf-8")
                         written.append(str(f))
-                    return self._json(dict(written=written, count=len(items)))
+                    return self._json(dict(written=written, count=len(items), groups=[g["name"] for g in groups]))
                 if p == "/api/pick_folder":
                     # native macOS chooser via AppleScript; returns {"path": ...} or {"path": null} if cancelled
                     import subprocess

@@ -70,7 +70,9 @@ main{display:grid;grid-template-columns:minmax(300px,1.05fr) minmax(360px,1.6fr)
 .add{min-width:64px}
 .add.on{background:#173323;border-color:#1f4a31;color:var(--ok)}
 .section{padding:8px 14px;background:var(--panel);color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid var(--line);position:sticky;top:0}
+.candnote{padding:8px 14px;border-bottom:1px solid var(--line);color:#c9a35a;font-style:italic;font-size:13px;background:#1c1a14}
 .searchbox{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.missingbar button{white-space:nowrap}
 .searchbox input{flex:1}
 /* playlist */
 .pl{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 14px;border-bottom:1px solid var(--line);cursor:grab}
@@ -112,6 +114,11 @@ dialog h2{margin:0 0 10px;font-size:16px}
 .chip b{font-weight:500;opacity:.7;margin-left:3px}
 .pill.flip{cursor:pointer}
 .pill.flip:hover{filter:brightness(1.25);outline:1px solid currentColor}
+.rtag{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:8px;vertical-align:1px}
+.rtag.must{color:var(--accent);border-color:#5a4416}
+.rtag.ded{color:#e89bd0;border-color:#5a2f4e}
+.note{color:var(--accent);margin-left:6px;font-size:12px}
+.req .cmt{color:#c9a35a;font-style:italic}
 .req .cp{padding:1px 7px;font-size:13px;opacity:0}
 .req:hover .cp,.req.sel .cp{opacity:1}
 .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -158,6 +165,9 @@ dialog h2{margin:0 0 10px;font-size:16px}
       <button class="chip" data-f="added">Added <b></b></button>
       <button class="chip" data-f="todo">To review <b></b></button>
       <button class="chip" data-f="inpl" title="The matching file is already in the playlist for another song in the list">In playlist <b></b></button>
+      <button class="chip tchip" data-f="must" title="Must Play requests">Must play <b></b></button>
+      <button class="chip tchip" data-f="dedication" title="Dedications / first dances">Dedications <b></b></button>
+      <button class="chip tchip" data-f="commented" title="Songs with a note from the client">With notes <b></b></button>
     </div>
     <div class="body">
       <div class="pad" id="inputpane">
@@ -167,9 +177,10 @@ Fleetwood Mac - Everywhere
 Whitney Houston – I Wanna Dance With Somebody
 Everywhere by Fleetwood Mac
 
-…or paste a CSV exported from Spotify (Exportify) with Track Name / Artist Name(s) columns."></textarea>
+…or a CSV from DJ Event Planner or Exportify — paste it, open it, or drop the file here."></textarea>
         <div class="row" style="margin-top:8px">
           <button class="primary" id="btnMatch">Match against library</button>
+          <button id="btnOpenFile" title="Open a CSV or text file (DJ Event Planner export, Exportify, plain list)">Open file…</button><input type="file" id="fileIn" accept=".csv,.txt,.tsv,.m3u,.m3u8" style="display:none">
           <button class="ghost" id="btnClear">Clear</button>
           <span class="sp" style="flex:1"></span>
           <span class="hint" id="spothint">Or a CSV from Exportify.</span>
@@ -196,6 +207,7 @@ Everywhere by Fleetwood Mac
   <!-- Candidates -->
   <section class="col">
     <div class="head"><span id="candtitle">Versions in your library</span><span class="sp"></span><button class="ghost" id="btnToggleMissing" style="display:none;text-transform:none;letter-spacing:0;font-weight:500">Mark as missing</button><span class="hint">↑↓ browse · <kbd>space</kbd> play · <kbd>enter</kbd> add</span></div>
+    <div class="candnote" id="candnote" style="display:none"></div>
     <div class="searchbox"><input id="search" placeholder="Search the whole library… (artist, title, remix)"><button id="btnSearch">Search</button></div>
     <div class="body" id="candlist"><div class="pad hint">Match a list on the left, or search above, to see candidate versions here.</div></div>
   </section>
@@ -207,6 +219,7 @@ Everywhere by Fleetwood Mac
     <div class="body" id="pllist"><div class="pad hint">Add versions from the middle column. Drag to reorder.</div></div>
     <div class="plfoot">
       <span class="tot" id="pltotal">0 tracks</span>
+      <button class="ghost" id="btnSortType" title="Order the playlist: dedications first, then must play, then if possible, then everything else" style="display:none">Sort by type</button>
       <button id="btnExportM3U">Export M3U8</button>
       <button class="primary" id="btnExportXML">Export for rekordbox</button>
     </div>
@@ -357,6 +370,12 @@ $('#btnMatch').onclick=async()=>{
   }catch(e){toast(e.message,true)}finally{$('#btnMatch').disabled=false;$('#btnMatch').textContent='Match against library'}
 };
 $('#btnClear').onclick=()=>{$('#pltext').value=''};
+$('#btnOpenFile').onclick=()=>$('#fileIn').click();
+function readListFile(f){if(!f)return;const rd=new FileReader();rd.onload=()=>{$('#pltext').value=rd.result;S.sourceName=S.sourceName||f.name.replace(/\.[^.]+$/,'');toast(`Loaded ${f.name} — press Match`)};rd.readAsText(f)}
+$('#fileIn').onchange=e=>{readListFile(e.target.files[0]);e.target.value=''};
+$('#pltext').addEventListener('dragover',e=>{e.preventDefault();$('#pltext').style.borderColor='var(--accent)'});
+$('#pltext').addEventListener('dragleave',()=>$('#pltext').style.borderColor='');
+$('#pltext').addEventListener('drop',e=>{e.preventDefault();$('#pltext').style.borderColor='';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)readListFile(f)});
 function newList(){$('#inputpane').style.display='block';$('#reqfoot').style.display='none';$('#filters').style.display='none';S.requests=[];S.sel=-1;S.playlist=[];S.playlistId=null;S.sourceName='';$('#pltext').value='';$('#spurl').value='';$('#plname').value=`Set ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;renderRequests();renderPlaylist();$('#candlist').innerHTML='<div class="pad hint">Paste a new list on the left.</div>';$('#savestate').textContent=''}
 $('#btnNewList').onclick=()=>{if(S.playlist.length||S.requests.length){if(!confirm('Start a new list? The current one is saved and stays in Saved playlists.'))return}newList()};
 $('#btnEditList').onclick=()=>{$('#inputpane').style.display='block';$('#inputpane').scrollIntoView({block:'start'});$('#pltext').focus()};
@@ -366,7 +385,9 @@ $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='
 // unless you've overridden it with Mark as missing / not missing.
 const reqKey=r=>((r.request.artist||'')+'|'+(r.request.title||'')).toLowerCase().replace(/\s+/g,' ').trim();
 const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&!r.inPlaylist&&(r.status==='not_found'||r.status==='possible'));
-const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist,inpl:r=>r.inPlaylist};
+const rtype=r=>(r.request.type||'').toLowerCase();
+const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist,inpl:r=>r.inPlaylist,
+  must:r=>rtype(r).includes('must'),dedication:r=>rtype(r).includes('dedication')||rtype(r).includes('first dance'),commented:r=>!!(r.request.comment)};
 // keep r.chosen in step with what is really in the playlist (survives loading and re-matching).
 // A playlist entry remembers which request it was added for (reqKey); a file that is in the playlist
 // for a *different* request shows as "in playlist" rather than "added", so counts stay honest.
@@ -396,7 +417,7 @@ document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.
 function renderRequests(){
   syncChosen();
   const el=$('#reqlist');el.innerHTML='';
-  document.querySelectorAll('.chip').forEach(c=>{const n=S.requests.filter(FILTERS[c.dataset.f]).length;c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=n;if(c.dataset.f==='inpl')c.style.display=n?'':'none'});
+  document.querySelectorAll('.chip').forEach(c=>{const n=S.requests.filter(FILTERS[c.dataset.f]).length;c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=n;if(c.dataset.f==='inpl'||c.classList.contains('tchip'))c.style.display=n?'':'none'});
   const vis=visibleIdx();
   if(S.requests.length&&!vis.length)el.innerHTML='<div class="pad hint">Nothing in this filter.</div>';
   vis.forEach(i=>{const r=S.requests[i];
@@ -407,7 +428,9 @@ function renderRequests(){
       :r.inPlaylist?`<span class="pill inpl" title="${r.duplicate?'This song is listed twice — the file is already in the playlist':'The matching file is already in the playlist for another song'}">${r.duplicate?'duplicate · in playlist':'in playlist'}</span>`
       :isMissing(r)?`<span class="pill not_found flip" title="Click to mark as NOT missing">${r.status==='possible'?'possible · missing':r.status==='not_found'?'missing':lbl+' · missing'}</span>`
       :`<span class="pill ${r.status} flip" title="Wrong match? Click to mark this song as missing">${lbl}${r.forceMissing===false?' · have it':''}</span>`;
-    d.innerHTML=`<div class="txt"><div class="t">${esc(t)}</div><div class="a">${esc(a||'(no artist given)')}</div></div><button class="ghost cp" title="Copy “${esc(a?a+' - ':'')}${esc(t)}”">⧉</button><span class="count">${r.candidates.filter(c=>c.tier!=='weak').length||''}</span>${pill}`;
+    const ty=r.request.type||'',cm=r.request.comment||'';
+    const tag=ty?`<span class="rtag ${ty.includes('must')?'must':ty.includes('dedication')?'ded':''}">${esc(ty)}</span>`:'';
+    d.innerHTML=`<div class="txt"><div class="t">${esc(t)}${tag}${cm?`<span class="note" title="${esc(cm)}">✎</span>`:''}</div><div class="a">${esc(a||'(no artist given)')}${cm?` <span class="cmt">— ${esc(cm)}</span>`:''}</div></div><button class="ghost cp" title="Copy “${esc(a?a+' - ':'')}${esc(t)}”">⧉</button><span class="count">${r.candidates.filter(c=>c.tier!=='weak').length||''}</span>${pill}`;
     d.querySelector('.cp').onclick=async e=>{e.stopPropagation();const line=(a?a+' - ':'')+t;await copyText(line);toast(`Copied: ${line}`)};
     const fp=d.querySelector('.pill.flip');if(fp)fp.onclick=e=>{e.stopPropagation();r.forceMissing=isMissing(r)?false:true;renderRequests();markDirty();toast(isMissing(r)?`"${t}" marked as missing`:`"${t}" marked as not missing`)};
     d.onclick=()=>selectRequest(i);el.appendChild(d)});
@@ -454,6 +477,7 @@ function selectRequest(i){
   if(i<0||i>=S.requests.length)return;S.sel=i;S.candMode='match';
   const r=S.requests[i];S.cands=r.candidates;S.candIdx=S.cands.length?0:-1;
   $('#candtitle').textContent=`${r.request.artist?r.request.artist+' – ':''}${r.request.title}`;
+  const cn=$('#candnote');cn.style.display=r.request.comment?'block':'none';cn.textContent=r.request.comment?'✎ '+r.request.comment:'';
   renderRequests();renderCands();
   const row=document.querySelectorAll('.req')[visibleIdx().indexOf(i)];row&&row.scrollIntoView({block:'nearest'});
 }
@@ -487,7 +511,7 @@ function renderCands(){
   highlightCand();
 }
 function highlightCand(){document.querySelectorAll('.cand').forEach((d,i)=>d.style.outline=i===S.candIdx?'1px solid var(--accent)':'none')}
-async function doSearch(){const q=$('#search').value.trim();if(!q)return;try{const j=await api.get('/api/search?q='+encodeURIComponent(q));S.candMode='search';$('#btnToggleMissing').style.display='none';S.cands=j.results.map(r=>({track:r.track,score:r.score,tier:null,notes:[]}));S.candIdx=S.cands.length?0:-1;$('#candtitle').textContent=`Search: ${q}`;renderCands()}catch(e){toast(e.message,true)}}
+async function doSearch(){const q=$('#search').value.trim();if(!q)return;try{const j=await api.get('/api/search?q='+encodeURIComponent(q));S.candMode='search';$('#btnToggleMissing').style.display='none';$('#candnote').style.display='none';S.cands=j.results.map(r=>({track:r.track,score:r.score,tier:null,notes:[]}));S.candIdx=S.cands.length?0:-1;$('#candtitle').textContent=`Search: ${q}`;renderCands()}catch(e){toast(e.message,true)}}
 $('#btnSearch').onclick=doSearch;$('#search').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
 
 // ---------------- playlist ----------------
@@ -512,16 +536,26 @@ function renderPlaylist(){
     d.ondragover=e=>{e.preventDefault();d.classList.add('over')};d.ondragleave=()=>d.classList.remove('over');
     d.ondrop=e=>{e.preventDefault();d.classList.remove('over');const from=+e.dataTransfer.getData('text/plain'),to=i;if(from===to)return;const [it]=S.playlist.splice(from,1);S.playlist.splice(to,0,it);renderPlaylist();markDirty()};
     el.appendChild(d)});
+  $('#btnSortType').style.display=playlistGroups().length?'':'none';
   const total=S.playlist.reduce((a,t)=>a+(t.duration_ms||0),0);
   $('#pltotal').textContent=`${S.playlist.length} track${S.playlist.length===1?'':'s'} · ${fmt(total)}`;
 }
+// request type for a playlist entry (via the song it was added for)
+const GROUP_ORDER=[['dedication','Dedications'],['must','Must play'],['if possible','If possible'],['spotify','Spotify playlist']];
+function entryGroup(e){const r=S.requests.find(r=>reqKey(r)===e.reqKey);const ty=(r?.request.type||'').toLowerCase();for(const [k,label] of GROUP_ORDER){if(ty.includes(k))return label}return r?'Other requests':'Added by hand'}
+function playlistGroups(){const g={};S.playlist.forEach(e=>{const k=entryGroup(e);(g[k]=g[k]||[]).push(e.id)});const labels=[...GROUP_ORDER.map(x=>x[1]),'Other requests','Added by hand'].filter(l=>g[l]);
+  const typed=labels.some(l=>GROUP_ORDER.some(x=>x[1]===l));return typed?labels.map(l=>({name:l,track_ids:g[l]})):[]}
 async function exportPl(format){
   if(!S.playlist.length)return toast('Playlist is empty',true);
   const name=$('#plname').value.trim()||`Slipbeats ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;
-  try{const j=await api.post('/api/export',{name,track_ids:S.playlist.map(t=>t.id),format});
-    toast(`Exported ${j.count} tracks → ${j.written.join(' and ')}. In rekordbox: File → Import → Import Playlist (M3U8) or set Preferences → Advanced → Database → rekordbox xml to the .xml file.`);}catch(e){toast(e.message,true)}
+  const groups=playlistGroups();
+  try{const j=await api.post('/api/export',{name,track_ids:S.playlist.map(t=>t.id),format,groups});
+    const gtxt=j.groups&&j.groups.length?` Split into ${j.groups.join(', ')}${format==='xml'?' inside a "'+name+'" folder':''}.`:'';
+    toast(`Exported ${j.count} tracks → ${j.written[0]}${j.written.length>1?' (+'+(j.written.length-1)+' more)':''}.${gtxt} In rekordbox: File → Import → Import Playlist (M3U8) or Preferences → Advanced → Database → rekordbox xml.`);}catch(e){toast(e.message,true)}
 }
-$('#btnExportM3U').onclick=()=>exportPl('m3u8');$('#btnExportXML').onclick=()=>exportPl('xml');
+function sortByType(){const rank=e=>{const g=entryGroup(e);const i=GROUP_ORDER.findIndex(x=>x[1]===g);return i<0?GROUP_ORDER.length:i};
+  S.playlist=S.playlist.map((e,i)=>[e,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);renderPlaylist();markDirty();toast('Sorted: dedications, must play, if possible, then the rest')}
+$('#btnExportM3U').onclick=()=>exportPl('m3u8');$('#btnSortType').onclick=sortByType;$('#btnExportXML').onclick=()=>exportPl('xml');
 // ---------------- autosave ----------------
 let saveT=null,saving=false;
 function snapshot(){return {tracks:S.playlist,requests:S.requests,text:$('#pltext').value,spurl:$('#spurl').value,sourceName:S.sourceName,filter:S.filter,v:2}}

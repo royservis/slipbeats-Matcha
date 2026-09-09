@@ -22,7 +22,7 @@ The index lives in `~/.slipbeats/library.db`. Exports go to `~/Slipbeats Playlis
 
 ## Use it
 
-- **Requested songs** (left): paste one song per line — `Artist - Title`, `Title by Artist`, tab-separated, or a CSV exported from Spotify with [Exportify](https://exportify.net) (Track Name / Artist Name(s) / Duration columns are used). Press **Match against library**.
+- **Requested songs** (left): paste one song per line, or **Open file…** / drop a CSV — DJ Event Planner exports (Request Type, Song, Artist, Comments) come in with Must play / Dedication tags and the client's notes, and songs listed in two sections are merged; Exportify CSVs bring durations. Lines like — `Artist - Title`, `Title by Artist`, tab-separated, or a CSV exported from Spotify with [Exportify](https://exportify.net) (Track Name / Artist Name(s) / Duration columns are used). Press **Match against library**.
 - Each song is marked **exact / likely / possible / not found**. Click a song to see every version in your library (middle column). Weak matches are folded away at the bottom.
 - **Versions** (middle): ▶ to audition, **0:45 / 1:30 / mid** buttons jump into the track so you can identify the version without sitting through the intro. **Add** puts it in the playlist — you can add several versions of the same song. The search box searches the whole library when the matcher misses.
 - Keyboard: ↑↓ move between versions, ←→ between songs, **space** play/pause, **enter** add/remove, **j / l** skip back/forward 10 s.

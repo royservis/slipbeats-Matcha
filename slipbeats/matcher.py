@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from .normalise import _extract_version, key, split_artists, tokens
+from .normalise import _extract_version, key, split_artists, split_title_suffix, tokens
 
 try:
     from rapidfuzz import fuzz, process
@@ -141,7 +142,10 @@ class Library:
 
     def match(self, artist: str, title: str, duration_ms: int | None = None,
               limit: int = 12) -> dict:
-        title_clean, req_version, req_vtoks, _ = _extract_version(title or "")
+        base_title, suffix = split_title_suffix(title or "")
+        title_clean, req_version, req_vtoks, _ = _extract_version(base_title)
+        if suffix:
+            req_vtoks |= set(tokens(suffix)); req_version = ", ".join(x for x in (req_version, suffix) if x)
         tq = key(title_clean) or key(title)
         req_artists = split_artists(artist) if artist else []
         aq = req_artists[0] if req_artists else ""
@@ -245,42 +249,83 @@ def track_to_dict(t: Track) -> dict:
     )
 
 
+def fix_mojibake(s: str) -> str:
+    """'MÃ¥neskin' -> 'Måneskin' (UTF-8 bytes that were decoded as Latin-1/cp1252 somewhere upstream)."""
+    if not s or not any(ch in s for ch in "ÃÂâ€"):
+        return s
+    for enc in ("cp1252", "latin-1"):
+        try:
+            fixed = s.encode(enc).decode("utf-8")
+            if fixed and not any(ch in fixed for ch in "ÃÂ"):
+                return fixed
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+    return s
+
+
+TYPE_SHORT = {"must play": "must", "play if possible": "if possible", "dedication": "dedication",
+              "spotify playlist": "spotify", "do not play": "do not play", "first dance": "first dance"}
+
+
 def parse_playlist_text(text: str) -> list[dict]:
-    """Turn pasted text or CSV (incl. Exportify / Spotify exports) into request dicts."""
+    """Turn pasted text or CSV into request dicts.
+
+    CSV support: Exportify / Spotify exports (Track Name, Artist Name(s), Duration (ms)) and
+    DJ Event Planner exports (Request Type, Song, Artist, Location, Comments). Rows for the same
+    song are merged (types combined) so a song listed in two sections appears once.
+    """
     import csv
     import io
     from .normalise import parse_request_line
 
-    lines = [l for l in text.splitlines() if l.strip()]
+    text = text.lstrip("\ufeff")
+    lines = [fix_mojibake(l) for l in text.splitlines() if l.strip()]
     if not lines:
         return []
     head = lines[0].lower()
-    if ("," in head or "\t" in head) and any(h in head for h in ("track name", "title", "artist")):
+    if ("," in head or "\t" in head) and any(h in head for h in ("track name", "title", "artist", "song")):
         dialect = "excel-tab" if "\t" in head else "excel"
         reader = csv.DictReader(io.StringIO("\n".join(lines)), dialect=dialect)
-        out = []
+        out: list[dict] = []
+        seen: dict[str, dict] = {}
         for row in reader:
-            low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            low = {re.sub(r"[^a-z]+", " ", (k or "").lower()).strip(): (v or "").strip() for k, v in row.items()}
             title = low.get("track name") or low.get("title") or low.get("song") or low.get("name") or ""
-            artist = (low.get("artist name(s)") or low.get("artist name") or low.get("artist")
+            artist = (low.get("artist name s") or low.get("artist name") or low.get("artist")
                       or low.get("artists") or "")
-            dur = low.get("duration (ms)") or low.get("duration_ms") or low.get("duration") or ""
+            dur = low.get("duration ms") or low.get("duration") or ""
             dur_ms = None
             if dur:
                 try:
-                    dur_ms = int(float(dur)) if dur.isdigit() or "." in dur else None
+                    dur_ms = int(float(dur)) if dur.replace(".", "").isdigit() else None
                 except ValueError:
                     dur_ms = None
                 if dur_ms is None and ":" in dur:
-                    m, s = dur.split(":")[:2]
-                    dur_ms = (int(m) * 60 + int(s)) * 1000
-            if title:
-                out.append(dict(artist=artist, title=title, duration_ms=dur_ms, raw=f"{artist} - {title}"))
+                    m, sec = dur.split(":")[:2]
+                    dur_ms = (int(m) * 60 + int(sec)) * 1000
+            rtype = (low.get("request type") or low.get("type") or "").strip()
+            comment = (low.get("comments") or low.get("comment") or low.get("notes") or "").strip()
+            if not title:
+                continue
+            k = f"{key(artist)}|{key(title)}"
+            if k in seen:
+                prev = seen[k]
+                if rtype and rtype.lower() not in [t.lower() for t in prev["types"]]:
+                    prev["types"].append(rtype)
+                if comment and comment not in prev["comment"]:
+                    prev["comment"] = (prev["comment"] + " · " + comment).strip(" ·")
+                continue
+            item = dict(artist=artist, title=title, duration_ms=dur_ms, raw=f"{artist} - {title}",
+                        types=[rtype] if rtype else [], comment=comment)
+            seen[k] = item
+            out.append(item)
         if out:
+            for it in out:
+                it["type"] = " + ".join(TYPE_SHORT.get(t.lower(), t.lower()) for t in it["types"])
             return out
     out = []
     for l in lines:
         a, t, d = parse_request_line(l)
         if t:
-            out.append(dict(artist=a, title=t, duration_ms=d, raw=l.strip()))
+            out.append(dict(artist=a, title=t, duration_ms=d, raw=l.strip(), type="", comment=""))
     return out
