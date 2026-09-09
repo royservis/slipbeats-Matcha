@@ -28,6 +28,10 @@ The index lives in `~/.slipbeats/library.db`. Exports go to `~/Slipbeats Playlis
 - Keyboard: ↑↓ move between versions, ←→ between songs, **space** play/pause, **enter** add/remove, **j / l** skip back/forward 10 s.
 - **Playlist** (right): drag to reorder, ✕ to remove, **Save** keeps it inside Slipbeats. Slipbeats remembers which version you picked for a song and floats it to the top next time ("your usual pick").
 
+## Sections (sub-playlists)
+
+Every playlist track can sit in a **section** — click the small badge under the artist (it shows the request type until you set one) to pick or create one, e.g. `Must play · before 7:30`. **Sections…** in the playlist footer offers *Suggest from client notes* (turns "not after 7:30pm", "after 10pm", "last song", "first dance" into sections automatically), bulk-assigning the tracks in the current song filter, or all tracks. **Sort by section** orders the playlist by them. On export, each section becomes its own playlist inside a folder (rekordbox xml) or its own `.m3u8`.
+
 ## Getting it into rekordbox
 
 **Export M3U8** → in rekordbox: *File → Import → Import Playlist*, choose the `.m3u8`. Simplest route.
@@ -35,6 +39,8 @@ The index lives in `~/.slipbeats/library.db`. Exports go to `~/Slipbeats Playlis
 **Export for rekordbox** (XML) → in rekordbox: *Preferences → Advanced → Database → rekordbox xml* → point it at the `.xml` (enable the *rekordbox xml* node under *Preferences → View → Layout* if it is hidden). It appears in the tree view; right-click the playlist → *Import Playlist*. Carries order and basic track info.
 
 Both reference your existing files by absolute path. Slipbeats never writes into the rekordbox database itself.
+
+If you already keep a rekordbox xml you import from, set it under the version number → *rekordbox xml*: exports then add/replace a Slipbeats folder inside that file (backup written as `.bak`) instead of writing a separate one, so nothing you have in it is lost.
 
 ## Spotify (optional, one-off setup)
 

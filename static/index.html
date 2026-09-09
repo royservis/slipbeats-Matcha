@@ -81,9 +81,17 @@ main{display:grid;grid-template-columns:minmax(300px,1.05fr) minmax(360px,1.6fr)
 .pl .n{font-family:var(--mono);color:var(--muted);font-size:11px;width:22px}
 .pl .txt{flex:1;min-width:0}
 .pl .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pl .a{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl .a{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px;min-width:0}
+.pl .a .an{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pl .m{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;white-space:nowrap}
 .pl .x{padding:2px 7px}
+.pl .sec{flex:none;padding:0 6px;font-size:10.5px;border-radius:4px;color:var(--muted);border:1px dashed var(--line);background:transparent;line-height:16px;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl .sec.own{color:var(--accent);border-style:solid;border-color:#5a4416}
+.secmenu{position:fixed;z-index:50;background:#22262e;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5);min-width:280px;max-width:380px;padding:6px}
+.secmenu .mi{padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px}
+.secmenu .mi:hover{background:#2c313b}
+.secmenu .mnew{display:flex;gap:6px;padding:6px 6px 2px;border-top:1px solid var(--line);margin-top:4px}
+.secmenu .mnew input{flex:1;padding:5px 8px;font-size:12.5px}
 .plhead{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:center}
 .plhead input{flex:1}
 .plfoot{border-top:1px solid var(--line);padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel)}
@@ -219,7 +227,8 @@ Everywhere by Fleetwood Mac
     <div class="body" id="pllist"><div class="pad hint">Add versions from the middle column. Drag to reorder.</div></div>
     <div class="plfoot">
       <span class="tot" id="pltotal">0 tracks</span>
-      <button class="ghost" id="btnSortType" title="Order the playlist: dedications first, then must play, then if possible, then everything else" style="display:none">Sort by type</button>
+      <button class="ghost" id="btnSections" title="Put tracks into sections (sub-playlists) — from the client's notes, or by hand">Sections…</button>
+      <button class="ghost" id="btnSortType" title="Order the playlist by section" style="display:none">Sort by section</button>
       <button id="btnExportM3U">Export M3U8</button>
       <button class="primary" id="btnExportXML">Export for rekordbox</button>
     </div>
@@ -248,6 +257,10 @@ Everywhere by Fleetwood Mac
   <div id="upState" class="hint" style="min-height:20px"></div>
   <div id="upNotes" class="hint" style="white-space:pre-wrap;max-height:160px;overflow:auto;margin-top:6px;display:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px"></div>
   <div class="bar" id="upBar" style="width:100%;margin-top:10px"><i></i></div>
+  <details style="margin-top:12px"><summary class="hint">rekordbox xml</summary>
+    <div class="hint" style="margin-top:6px">Leave blank and each export writes its own .xml in the playlists folder. Or point this at the rekordbox xml file you already use (Preferences → Advanced → Database → rekordbox xml) and Slipbeats will add its folder into that file instead, keeping everything else in it (a .bak backup is written each time).</div>
+    <div class="row"><input id="rbxml" placeholder="/Users/you/Documents/rekordbox.xml"><button id="btnRbPick">Choose…</button><button id="btnRbSave">Save</button></div>
+  </details>
   <details id="upSetup" style="margin-top:12px"><summary class="hint">Update source (GitHub)</summary>
     <div class="hint" style="margin-top:6px">Updates come from the GitHub Releases of your repo. For a private repo, create a fine-grained token at <b>github.com/settings/personal-access-tokens</b> → Generate new token → Repository access: <i>only this repo</i> → Permissions → Contents: <b>Read-only</b>. Paste it here once.</div>
     <div class="row"><input id="upRepo" placeholder="owner/slipbeats-matcha" style="flex:.7"><input id="upToken" placeholder="github_pat_… (leave blank to keep the saved one)" type="password"><button id="btnUpSave">Save</button></div>
@@ -298,7 +311,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 let toastT;function toast(m,err){const t=$('#toast');t.textContent=m;t.className='toast'+(err?' err':'');t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',err?6000:3200)}
 
 // ---------------- state ----------------
-const S={requests:[],sel:-1,cands:[],candMode:'match',playlist:[],playlistId:null,playingId:null,candIdx:-1,filter:'all',sourceName:''};
+const S={requests:[],sel:-1,cands:[],candMode:'match',playlist:[],playlistId:null,playingId:null,candIdx:-1,filter:'all',sourceName:'',sections:[]};
 const trackById=t=>S.playlist.find(x=>x.id===t);
 
 // ---------------- library status ----------------
@@ -376,7 +389,7 @@ $('#fileIn').onchange=e=>{readListFile(e.target.files[0]);e.target.value=''};
 $('#pltext').addEventListener('dragover',e=>{e.preventDefault();$('#pltext').style.borderColor='var(--accent)'});
 $('#pltext').addEventListener('dragleave',()=>$('#pltext').style.borderColor='');
 $('#pltext').addEventListener('drop',e=>{e.preventDefault();$('#pltext').style.borderColor='';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)readListFile(f)});
-function newList(){$('#inputpane').style.display='block';$('#reqfoot').style.display='none';$('#filters').style.display='none';S.requests=[];S.sel=-1;S.playlist=[];S.playlistId=null;S.sourceName='';$('#pltext').value='';$('#spurl').value='';$('#plname').value=`Set ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;renderRequests();renderPlaylist();$('#candlist').innerHTML='<div class="pad hint">Paste a new list on the left.</div>';$('#savestate').textContent=''}
+function newList(){$('#inputpane').style.display='block';$('#reqfoot').style.display='none';$('#filters').style.display='none';S.requests=[];S.sel=-1;S.playlist=[];S.playlistId=null;S.sourceName='';S.sections=[];$('#pltext').value='';$('#spurl').value='';$('#plname').value=`Set ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;renderRequests();renderPlaylist();$('#candlist').innerHTML='<div class="pad hint">Paste a new list on the left.</div>';$('#savestate').textContent=''}
 $('#btnNewList').onclick=()=>{if(S.playlist.length||S.requests.length){if(!confirm('Start a new list? The current one is saved and stays in Saved playlists.'))return}newList()};
 $('#btnEditList').onclick=()=>{$('#inputpane').style.display='block';$('#inputpane').scrollIntoView({block:'start'});$('#pltext').focus()};
 $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='exact'&&!r.chosen.length){const c=r.candidates[0];if(addToPlaylist(c.track,i,true))n++}});renderRequests();renderPlaylist();renderCands();markDirty();toast(`Added ${n} tracks`)};
@@ -530,8 +543,10 @@ function renderPlaylist(){
   if(!S.playlist.length){el.innerHTML='<div class="pad hint">Add versions from the middle column. Drag to reorder.</div>'}
   S.playlist.forEach((t,i)=>{
     const d=document.createElement('div');d.className='pl'+(S.playingId===t.id?' playing':'');d.draggable=true;d.dataset.i=i;
-    d.innerHTML=`<span class="n">${i+1}</span><div class="txt"><div class="t">${esc(t.title)}${t.version?` <span style="color:var(--accent);font-size:12px">${esc(t.version)}</span>`:''}</div><div class="a">${esc(t.artist)}</div></div><div class="m">${t.bpm?t.bpm+'<br>':''}${fmt(t.duration_ms)}</div><button class="ghost x" title="Play">▶</button><button class="ghost x" title="Remove">✕</button>`;
-    const [bp,bx]=d.querySelectorAll('button');bp.onclick=()=>togglePlay(t);bx.onclick=()=>{removeFromPlaylist(t.id);renderPlaylist();renderRequests();renderCands();markDirty()};
+    const grp=entryGroup(t),own=!!t.section;
+    d.innerHTML=`<span class="n">${i+1}</span><div class="txt"><div class="t">${esc(t.title)}${t.version?` <span style="color:var(--accent);font-size:12px">${esc(t.version)}</span>`:''}</div><div class="a"><span class="an">${esc(t.artist)}</span>${(own||S.sections.length||grp!=='Added by hand')?`<button class="sec ${own?'own':''}" title="Section — becomes a sub-playlist on export. Click to change">${esc(grp)}</button>`:''}</div></div><div class="m">${t.bpm?t.bpm+'<br>':''}${fmt(t.duration_ms)}</div><button class="ghost x" title="Play">▶</button><button class="ghost x" title="Remove">✕</button>`;
+    const sb=d.querySelector('.sec');if(sb)sb.onclick=e=>{e.stopPropagation();sectionMenu(sb,[t])};
+    const [bp,bx]=[...d.querySelectorAll('button')].filter(b=>!b.classList.contains('sec'));bp.onclick=()=>togglePlay(t);bx.onclick=()=>{removeFromPlaylist(t.id);renderPlaylist();renderRequests();renderCands();markDirty()};
     d.ondragstart=e=>{e.dataTransfer.setData('text/plain',i);d.classList.add('drag')};d.ondragend=()=>d.classList.remove('drag');
     d.ondragover=e=>{e.preventDefault();d.classList.add('over')};d.ondragleave=()=>d.classList.remove('over');
     d.ondrop=e=>{e.preventDefault();d.classList.remove('over');const from=+e.dataTransfer.getData('text/plain'),to=i;if(from===to)return;const [it]=S.playlist.splice(from,1);S.playlist.splice(to,0,it);renderPlaylist();markDirty()};
@@ -542,23 +557,55 @@ function renderPlaylist(){
 }
 // request type for a playlist entry (via the song it was added for)
 const GROUP_ORDER=[['dedication','Dedications'],['must','Must play'],['if possible','If possible'],['spotify','Spotify playlist']];
-function entryGroup(e){const r=S.requests.find(r=>reqKey(r)===e.reqKey);const ty=(r?.request.type||'').toLowerCase();for(const [k,label] of GROUP_ORDER){if(ty.includes(k))return label}return r?'Other requests':'Added by hand'}
-function playlistGroups(){const g={};S.playlist.forEach(e=>{const k=entryGroup(e);(g[k]=g[k]||[]).push(e.id)});const labels=[...GROUP_ORDER.map(x=>x[1]),'Other requests','Added by hand'].filter(l=>g[l]);
-  const typed=labels.some(l=>GROUP_ORDER.some(x=>x[1]===l));return typed?labels.map(l=>({name:l,track_ids:g[l]})):[]}
+function typeGroup(e){const r=S.requests.find(r=>reqKey(r)===e.reqKey);const ty=(r?.request.type||'').toLowerCase();for(const [k,label] of GROUP_ORDER){if(ty.includes(k))return label}return r?'Other requests':'Added by hand'}
+function entryGroup(e){return e.section||typeGroup(e)}
+function groupOrder(){return [...S.sections,...GROUP_ORDER.map(x=>x[1]).filter(l=>!S.sections.includes(l)),'Other requests','Added by hand']}
+function playlistGroups(){const g={};S.playlist.forEach(e=>{const k=entryGroup(e);(g[k]=g[k]||[]).push(e.id)});const labels=groupOrder().filter(l=>g[l]);
+  const meaningful=labels.some(l=>l!=='Other requests'&&l!=='Added by hand');return meaningful?labels.map(l=>({name:l,track_ids:g[l]})):[]}
+function setSection(entries,name){name=(name||'').trim();entries.forEach(e=>{if(name)e.section=name;else delete e.section});if(name&&!S.sections.includes(name))S.sections.push(name);
+  S.sections=S.sections.filter(sec=>S.playlist.some(e=>e.section===sec));renderPlaylist();markDirty()}
+// popup menu to pick / create a section for one or more entries
+function sectionMenu(anchor,entries){document.querySelectorAll('.secmenu').forEach(m=>m.remove());
+  const m=document.createElement('div');m.className='secmenu';
+  const opts=[...new Set([...S.sections,...GROUP_ORDER.map(x=>x[1])])];
+  m.innerHTML=opts.map(o=>`<div class="mi" data-s="${esc(o)}">${esc(o)}</div>`).join('')+`<div class="mi" data-s="">No section (use request type)</div><div class="mnew"><input placeholder="New section, e.g. Must play · before 7:30"><button>Add</button></div>`;
+  m.querySelectorAll('.mi').forEach(el=>el.onclick=()=>{setSection(entries,el.dataset.s);m.remove()});
+  const inp=m.querySelector('input'),btn=m.querySelector('button');const go=()=>{if(inp.value.trim()){setSection(entries,inp.value);m.remove()}};btn.onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go();if(e.key==='Escape')m.remove()});
+  document.body.appendChild(m);const r=anchor.getBoundingClientRect();m.style.top=Math.min(window.innerHeight-m.offsetHeight-10,r.bottom+4)+'px';m.style.left=Math.max(8,Math.min(window.innerWidth-m.offsetWidth-8,r.right-m.offsetWidth))+'px';
+  setTimeout(()=>{inp.focus();document.addEventListener('mousedown',function h(ev){if(!m.contains(ev.target)){m.remove();document.removeEventListener('mousedown',h)}})},0)}
+// pull sections out of the client's notes: "not after 7:30pm" → "before 7:30pm", "after 10pm" → "after 10pm"
+function suggestSections(){let n=0;const TIME='(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?)';
+  S.playlist.forEach(e=>{if(e.section)return;const r=S.requests.find(r=>reqKey(r)===e.reqKey);const c=(r?.request.comment||'').toLowerCase();if(!c)return;
+    let sec=null,m;
+    if((m=c.match(new RegExp('(?:not after|before|by|no later than)\\s*'+TIME))))sec='before '+m[1].replace(/\s+/g,'');
+    else if((m=c.match(new RegExp('(?:after|from|later than)\\s*'+TIME))))sec='after '+m[1].replace(/\s+/g,'');
+    else if(/last song|end of (the )?night|last dance/.test(c))sec='end of night';
+    else if(/first dance/.test(c))sec='first dance';
+    else if(/towards the end/.test(c))sec='late';
+    else if(/beginning|start of/.test(c))sec='early';
+    if(!sec)return;const base=typeGroup(e);const name=(base==='Must play'||base==='If possible')?`${base} · ${sec}`:sec.charAt(0).toUpperCase()+sec.slice(1);
+    e.section=name;if(!S.sections.includes(name))S.sections.push(name);n++});
+  renderPlaylist();markDirty();toast(n?`${n} tracks put into sections from the client's notes — click a section badge to change any`:'No timing hints found in the notes')}
 async function exportPl(format){
   if(!S.playlist.length)return toast('Playlist is empty',true);
   const name=$('#plname').value.trim()||`Slipbeats ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;
   const groups=playlistGroups();
-  try{const j=await api.post('/api/export',{name,track_ids:S.playlist.map(t=>t.id),format,groups});
+  try{const j=await api.post('/api/export',{name,track_ids:S.playlist.map(t=>t.id),format,groups,merge_path:SETTINGS.rekordbox_xml||''});
     const gtxt=j.groups&&j.groups.length?` Split into ${j.groups.join(', ')}${format==='xml'?' inside a "'+name+'" folder':''}.`:'';
     toast(`Exported ${j.count} tracks → ${j.written[0]}${j.written.length>1?' (+'+(j.written.length-1)+' more)':''}.${gtxt} In rekordbox: File → Import → Import Playlist (M3U8) or Preferences → Advanced → Database → rekordbox xml.`);}catch(e){toast(e.message,true)}
 }
-function sortByType(){const rank=e=>{const g=entryGroup(e);const i=GROUP_ORDER.findIndex(x=>x[1]===g);return i<0?GROUP_ORDER.length:i};
-  S.playlist=S.playlist.map((e,i)=>[e,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);renderPlaylist();markDirty();toast('Sorted: dedications, must play, if possible, then the rest')}
-$('#btnExportM3U').onclick=()=>exportPl('m3u8');$('#btnSortType').onclick=sortByType;$('#btnExportXML').onclick=()=>exportPl('xml');
+function sortByType(){const order=groupOrder();const rank=e=>{const i=order.indexOf(entryGroup(e));return i<0?order.length:i};
+  S.playlist=S.playlist.map((e,i)=>[e,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);renderPlaylist();markDirty();toast('Sorted by section: '+groupOrder().filter(l=>S.playlist.some(e=>entryGroup(e)===l)).join(' → '))}
+$('#btnExportM3U').onclick=()=>exportPl('m3u8');$('#btnSortType').onclick=sortByType;
+$('#btnSections').onclick=()=>{if(!S.playlist.length)return toast('Playlist is empty',true);document.querySelectorAll('.secmenu').forEach(m=>m.remove());
+  const m=document.createElement('div');m.className='secmenu';const vis=visibleIdx().map(i=>reqKey(S.requests[i]));const inFilter=S.playlist.filter(e=>vis.includes(e.reqKey));
+  m.innerHTML=`<div class="mi" data-a="suggest">Suggest from client notes (“not after 7:30pm”…)</div><div class="mi" data-a="filter">Put the ${inFilter.length} tracks in the current song filter into a section…</div><div class="mi" data-a="all">Put all ${S.playlist.length} tracks into a section…</div><div class="mi" data-a="clear">Clear all sections</div>`;
+  m.querySelectorAll('.mi').forEach(el=>el.onclick=()=>{const a=el.dataset.a;m.remove();if(a==='suggest')suggestSections();else if(a==='clear'){S.playlist.forEach(e=>delete e.section);S.sections=[];renderPlaylist();markDirty()}else sectionMenu($('#btnSections'),a==='all'?S.playlist:inFilter)});
+  document.body.appendChild(m);const r=$('#btnSections').getBoundingClientRect();m.style.top=(r.top-m.offsetHeight-6)+'px';m.style.left=Math.max(8,r.left)+'px';
+  setTimeout(()=>document.addEventListener('mousedown',function h(ev){if(!m.contains(ev.target)){m.remove();document.removeEventListener('mousedown',h)}}),0)};$('#btnExportXML').onclick=()=>exportPl('xml');
 // ---------------- autosave ----------------
 let saveT=null,saving=false;
-function snapshot(){return {tracks:S.playlist,requests:S.requests,text:$('#pltext').value,spurl:$('#spurl').value,sourceName:S.sourceName,filter:S.filter,v:2}}
+function snapshot(){return {tracks:S.playlist,requests:S.requests,text:$('#pltext').value,spurl:$('#spurl').value,sourceName:S.sourceName,filter:S.filter,sections:S.sections,v:3}}
 function markDirty(){if(!S.requests.length&&!S.playlist.length)return;$('#savestate').textContent='…';clearTimeout(saveT);saveT=setTimeout(saveNow,900)}
 async function saveNow(){
   if(saving){markDirty();return}saving=true;
@@ -571,7 +618,7 @@ async function loadSavedList(){try{const j=await api.get('/api/playlists');const
 $('#plsaved').onchange=async e=>{const id=e.target.value;e.target.value='';if(!id)return;
   if(String(S.playlistId)===id)return;
   try{const p=await api.get('/api/playlist?id='+id);const d=p.data||{};
-    S.playlistId=p.id;$('#plname').value=p.name;S.playlist=d.tracks||[];$('#pltext').value=d.text||'';$('#spurl').value=d.spurl||'';S.sourceName=d.sourceName||'';
+    S.playlistId=p.id;$('#plname').value=p.name;S.playlist=d.tracks||[];S.sections=d.sections||[];$('#pltext').value=d.text||'';$('#spurl').value=d.spurl||'';S.sourceName=d.sourceName||'';
     S.requests=(d.requests||[]).map(r=>({...r,chosen:r.chosen||[]}));
     if(S.requests.length&&S.requests[0].candidates){$('#inputpane').style.display='none';$('#reqfoot').style.display='flex';$('#filters').style.display='flex';S.filter=d.filter&&FILTERS[d.filter]?d.filter:'all';renderRequests();selectRequest(visibleIdx()[0]??0)}
     else{$('#inputpane').style.display='block';$('#reqfoot').style.display='none';$('#filters').style.display='none';S.requests=[];S.sel=-1;renderRequests();$('#candlist').innerHTML='<div class="pad hint">This playlist was saved before full autosave existed — press Match to rebuild the candidates.</div>'}
@@ -599,7 +646,10 @@ function renderUpdate(){
   notes.style.display=(l&&l.newer&&l.notes)?'block':'none';notes.textContent=l?.notes||'';
   inst.style.display=(l&&l.newer&&UP.can_install&&l.asset_url&&(UP.phase==='idle'||UP.phase==='error'))?'':'none';
 }
-async function openAbout(){await upStatus();renderUpdate();$('#dlgAbout').showModal()}
+let SETTINGS={};async function loadSettings(){try{SETTINGS=await api.get('/api/settings')}catch(e){SETTINGS={}}$('#rbxml').value=SETTINGS.rekordbox_xml||''}
+async function openAbout(){await upStatus();renderUpdate();await loadSettings();$('#dlgAbout').showModal()}
+$('#btnRbSave').onclick=async()=>{try{SETTINGS=await api.post('/api/settings',{rekordbox_xml:$('#rbxml').value.trim()});toast(SETTINGS.rekordbox_xml?'Exports will merge into '+SETTINGS.rekordbox_xml:'Exports will write their own xml files')}catch(e){toast(e.message,true)}};
+$('#btnRbPick').onclick=async()=>{if(!(window.pywebview&&window.pywebview.api))return toast('Type the path — the file chooser only works in the Mac app',true);const p=await window.pywebview.api.pick_file();if(p){$('#rbxml').value=p;$('#btnRbSave').click()}};
 $('#btnAbout').onclick=openAbout;$('#btnUpdateAvail').onclick=openAbout;$('#btnCloseAbout').onclick=()=>$('#dlgAbout').close();
 $('#btnUpSave').onclick=async()=>{try{UP=await api.post('/api/update/config',{repo:$('#upRepo').value,token:$('#upToken').value.trim()||null});$('#upToken').value='';toast('Saved');renderUpdate()}catch(e){toast(e.message,true)}};
 $('#btnUpCheck').onclick=async()=>{$('#btnUpCheck').disabled=true;try{await api.post('/api/update/check',{});await upStatus();renderUpdate()}catch(e){toast(e.message,true)}finally{$('#btnUpCheck').disabled=false}};
@@ -667,7 +717,7 @@ document.addEventListener('keydown',e=>{
 });
 
 // ---------------- boot ----------------
-refreshStatus();loadSavedList();renderPlaylist();
+refreshStatus();loadSavedList();renderPlaylist();loadSettings();
 $('#plname').value=`Set ${new Date().toLocaleDateString('en-GB').replace(/\//g,'-')}`;
 </script>
 </body>

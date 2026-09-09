@@ -80,6 +80,81 @@ def to_rekordbox_xml(name: str, items: list[dict], groups: list[dict] | None = N
     return "\n".join(out) + "\n"
 
 
+def merge_into_rekordbox_xml(existing_path: str, name: str, items: list[dict], groups: list[dict] | None) -> str:
+    """Add (or replace) a Slipbeats folder/playlist inside the user's own rekordbox.xml.
+    Existing tracks are reused by Location; new ones get fresh TrackIDs. A .bak copy is written first.
+    Returns the path written."""
+    import shutil
+    import xml.etree.ElementTree as ET
+    from urllib.parse import unquote
+
+    src = Path(existing_path).expanduser()
+    if not src.exists() or src.stat().st_size < 50:
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text(to_rekordbox_xml(name, items, groups), encoding="utf-8")
+        return str(src)
+    shutil.copy2(src, src.with_suffix(src.suffix + ".bak"))
+    tree = ET.parse(src)
+    root = tree.getroot()
+    coll = root.find("COLLECTION")
+    pls = root.find("PLAYLISTS")
+    if coll is None or pls is None:
+        raise ValueError("That file doesn't look like a rekordbox xml (no COLLECTION/PLAYLISTS)")
+    # index existing tracks by decoded location path
+    by_loc: dict[str, str] = {}
+    max_id = 0
+    for t in coll.findall("TRACK"):
+        loc = unquote(t.get("Location", "").replace("file://localhost", ""))
+        by_loc[loc] = t.get("TrackID", "0")
+        try:
+            max_id = max(max_id, int(t.get("TrackID", "0")))
+        except ValueError:
+            pass
+    today = dt.date.today().isoformat()
+    id_by_path: dict[str, str] = {}
+    for it in items:
+        if it["path"] in by_loc:
+            id_by_path[it["path"]] = by_loc[it["path"]]
+            continue
+        max_id += 1
+        secs = int(round((it.get("duration_ms") or 0) / 1000))
+        ET.SubElement(coll, "TRACK", {
+            "TrackID": str(max_id), "Name": it.get("title", ""), "Artist": it.get("artist", ""),
+            "Album": it.get("album") or "", "Genre": it.get("genre") or "", "Kind": kind_for(it["path"]),
+            "Size": str(it.get("size") or 0), "TotalTime": str(secs), "Year": str(it.get("year") or 0),
+            "AverageBpm": f"{float(it['bpm']):.2f}" if it.get("bpm") else "0.00", "DateAdded": today,
+            "BitRate": str(it.get("bitrate") or 0), "Tonality": it.get("key") or "",
+            "Comments": it.get("comment") or "",
+            "Location": "file://localhost" + quote(it["path"], safe="/()[]!,'=+$@;:-_.~"),
+        })
+        id_by_path[it["path"]] = str(max_id)
+        by_loc[it["path"]] = str(max_id)
+    coll.set("Entries", str(len(coll.findall("TRACK"))))
+    rootnode = pls.find("NODE")
+    if rootnode is None:
+        rootnode = ET.SubElement(pls, "NODE", {"Type": "0", "Name": "ROOT", "Count": "0"})
+    # replace any previous node with this name
+    for old in [n for n in rootnode.findall("NODE") if n.get("Name") == name]:
+        rootnode.remove(old)
+
+    def add_playlist(parent, pname, paths):
+        node = ET.SubElement(parent, "NODE", {"Name": pname, "Type": "1", "KeyType": "0", "Entries": str(len(paths))})
+        for p in paths:
+            ET.SubElement(node, "TRACK", {"Key": id_by_path[p]})
+    all_paths = [it["path"] for it in items]
+    if groups:
+        folder = ET.SubElement(rootnode, "NODE", {"Type": "0", "Name": name, "Count": str(len(groups) + 1)})
+        add_playlist(folder, "All", all_paths)
+        for g in groups:
+            add_playlist(folder, g["name"], [p for p in g.get("paths", []) if p in id_by_path])
+    else:
+        add_playlist(rootnode, name, all_paths)
+    rootnode.set("Count", str(len(rootnode.findall("NODE"))))
+    ET.indent(tree, space="  ")
+    tree.write(src, encoding="UTF-8", xml_declaration=True)
+    return str(src)
+
+
 def kind_for(path: str) -> str:
     ext = Path(path).suffix.lower()
     return {".mp3": "MP3 File", ".m4a": "M4A File", ".aif": "AIFF File", ".aiff": "AIFF File",

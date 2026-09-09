@@ -42,6 +42,18 @@ class Api:
         path = res[0] if isinstance(res, (list, tuple)) else res
         return str(path).rstrip("/")
 
+    def pick_file(self, save_name: str | None = None):
+        import webview
+        if save_name:
+            dialog = getattr(getattr(webview, "FileDialog", None), "SAVE", None) or webview.SAVE_DIALOG
+            res = self.window.create_file_dialog(dialog, save_filename=save_name)
+        else:
+            dialog = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
+            res = self.window.create_file_dialog(dialog, allow_multiple=False, file_types=("rekordbox xml (*.xml)",))
+        if not res:
+            return None
+        return str(res[0] if isinstance(res, (list, tuple)) else res)
+
     def reveal(self, path: str):
         import subprocess
         subprocess.Popen(["open", "-R", path])

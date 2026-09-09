@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .export import absolute_path, to_m3u8, to_rekordbox_xml
+from .export import absolute_path, merge_into_rekordbox_xml, to_m3u8, to_rekordbox_xml
 from .indexer import Scanner, add_root, connect
 from .matcher import Library, parse_playlist_text, track_to_dict
 from .normalise import key
@@ -48,6 +48,11 @@ class App:
         self.export_dir = Path(export_dir).expanduser() if export_dir else Path.home() / "Slipbeats Playlists"
         self.spotify = Spotify(Path(db_path).parent / "spotify.json")
         self.updater = Updater(Path(db_path).parent / "update.json")
+        self.settings_path = Path(db_path).parent / "settings.json"
+        try:
+            self.settings = json.loads(self.settings_path.read_text())
+        except Exception:
+            self.settings = {}
         self.port = 8765
 
     # --- helpers -----------------------------------------------------------
@@ -148,6 +153,8 @@ def make_handler(app: App):
                                            export_dir=str(app.export_dir), version=VERSION))
                 if p == "/api/update/status":
                     return self._json(app.updater.status())
+                if p == "/api/settings":
+                    return self._json(app.settings)
                 if p == "/api/search":
                     app.ensure_lib_fresh()
                     return self._json(dict(results=app.lib.search(q.get("q", ""), int(q.get("limit", 40)))))
@@ -327,9 +334,13 @@ def make_handler(app: App):
                             gf.write_text(to_m3u8(f"{name} - {g['name']}", [by_path[p] for p in g["paths"] if p in by_path]), encoding="utf-8")
                             written.append(str(gf))
                     if fmt in ("xml", "both"):
-                        f = app.export_dir / f"{name}.xml"
-                        f.write_text(to_rekordbox_xml(name, items, groups or None), encoding="utf-8")
-                        written.append(str(f))
+                        merge_path = (body.get("merge_path") or "").strip()
+                        if merge_path:
+                            written.append(merge_into_rekordbox_xml(merge_path, name, items, groups or None))
+                        else:
+                            f = app.export_dir / f"{name}.xml"
+                            f.write_text(to_rekordbox_xml(name, items, groups or None), encoding="utf-8")
+                            written.append(str(f))
                     return self._json(dict(written=written, count=len(items), groups=[g["name"] for g in groups]))
                 if p == "/api/pick_folder":
                     # native macOS chooser via AppleScript; returns {"path": ...} or {"path": null} if cancelled
@@ -359,6 +370,10 @@ def make_handler(app: App):
                                   {".mp3", ".m4a", ".aif", ".aiff", ".wav", ".flac"}) if base.is_dir() else 0
                     return self._json(dict(path=str(base), parent=str(base.parent) if base.parent != base else None,
                                            dirs=subs, volumes=volumes, audio_files_here=n_audio))
+                if p == "/api/settings":
+                    app.settings.update({k: v for k, v in body.items()})
+                    app.settings_path.write_text(json.dumps(app.settings, indent=2))
+                    return self._json(app.settings)
                 if p == "/api/update/config":
                     app.updater.configure(body.get("repo", ""), body.get("token"))
                     return self._json(app.updater.status())
