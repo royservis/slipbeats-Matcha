@@ -173,8 +173,7 @@ dialog h2{margin:0 0 10px;font-size:16px}
       <button class="chip" data-f="added">Added <b></b></button>
       <button class="chip" data-f="todo">To review <b></b></button>
       <button class="chip" data-f="inpl" title="The matching file is already in the playlist for another song in the list">In playlist <b></b></button>
-      <button class="chip tchip" data-f="must" title="Must Play requests">Must play <b></b></button>
-      <button class="chip tchip" data-f="dedication" title="Dedications / first dances">Dedications <b></b></button>
+      <span id="typechips"></span>
       <button class="chip tchip" data-f="commented" title="Songs with a note from the client">With notes <b></b></button>
     </div>
     <div class="body">
@@ -399,8 +398,13 @@ $('#btnAutoAdd').onclick=()=>{let n=0;S.requests.forEach((r,i)=>{if(r.status==='
 const reqKey=r=>((r.request.artist||'')+'|'+(r.request.title||'')).toLowerCase().replace(/\s+/g,' ').trim();
 const isMissing=r=>r.forceMissing===true?true:r.forceMissing===false?false:(!r.chosen.length&&!r.inPlaylist&&(r.status==='not_found'||r.status==='possible'));
 const rtype=r=>(r.request.type||'').toLowerCase();
-const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist,inpl:r=>r.inPlaylist,
-  must:r=>rtype(r).includes('must'),dedication:r=>rtype(r).includes('dedication')||rtype(r).includes('first dance'),commented:r=>!!(r.request.comment)};
+const TYPE_LABELS={'must':'Must play','if possible':'If possible','dedication':'Dedications','spotify':'Spotify playlist','do not play':'Do not play','first dance':'First dance'};
+const reqTypes=r=>rtype(r).split('+').map(x=>x.trim()).filter(Boolean);
+const FILTERS={all:r=>true,found:r=>!isMissing(r),missing:isMissing,added:r=>r.chosen.length>0,todo:r=>!isMissing(r)&&!r.chosen.length&&!r.inPlaylist,inpl:r=>r.inPlaylist,commented:r=>!!(r.request.comment)};
+// one chip per request type present in the list (Must play, If possible, Dedications, Spotify playlist…)
+function buildTypeChips(){const types=[...new Set(S.requests.flatMap(reqTypes))];const order=Object.keys(TYPE_LABELS);types.sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
+  const host=$('#typechips');host.innerHTML='';types.forEach(t=>{const f='type:'+t;FILTERS[f]=r=>reqTypes(r).includes(t);const c=document.createElement('button');c.className='chip tchip';c.dataset.f=f;c.innerHTML=`${esc(TYPE_LABELS[t]||t.charAt(0).toUpperCase()+t.slice(1))} <b></b>`;c.onclick=()=>{S.filter=f;renderRequests();const v=visibleIdx();if(v.length&&!v.includes(S.sel))selectRequest(v[0])};host.appendChild(c)});
+  if(S.filter.startsWith('type:')&&!FILTERS[S.filter])S.filter='all'}
 // keep r.chosen in step with what is really in the playlist (survives loading and re-matching).
 // A playlist entry remembers which request it was added for (reqKey); a file that is in the playlist
 // for a *different* request shows as "in playlist" rather than "added", so counts stay honest.
@@ -428,7 +432,7 @@ function syncChosen(){
 const visibleIdx=()=>S.requests.map((r,i)=>FILTERS[S.filter](r)?i:-1).filter(i=>i>=0);
 document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{S.filter=c.dataset.f;renderRequests();const v=visibleIdx();if(v.length&&!v.includes(S.sel))selectRequest(v[0])});
 function renderRequests(){
-  syncChosen();
+  syncChosen();buildTypeChips();
   const el=$('#reqlist');el.innerHTML='';
   document.querySelectorAll('.chip').forEach(c=>{const n=S.requests.filter(FILTERS[c.dataset.f]).length;c.classList.toggle('on',c.dataset.f===S.filter);c.querySelector('b').textContent=n;if(c.dataset.f==='inpl'||c.classList.contains('tchip'))c.style.display=n?'':'none'});
   const vis=visibleIdx();
