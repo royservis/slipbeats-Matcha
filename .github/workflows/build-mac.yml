@@ -16,13 +16,18 @@ jobs:
 
       - name: Read version from slipbeats/__init__.py
         id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           V=$(sed -n 's/^VERSION = "\([^"]*\)"/\1/p' slipbeats/__init__.py)
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          if git ls-remote --tags origin "refs/tags/v$V" | grep -q .; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "Release v$V already exists — building only."
+          # Test for a published RELEASE, not merely a tag. A stray tag with no release
+          # behind it used to skip publication silently and leave the in-app updater
+          # with nothing to update to.
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"; echo "Release v$V already published — building only."
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"; echo "New version v$V — will create a release."
+            echo "exists=false" >> "$GITHUB_OUTPUT"; echo "No release for v$V yet — will publish one."
           fi
 
       - uses: actions/setup-python@v5
