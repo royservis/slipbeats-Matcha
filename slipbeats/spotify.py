@@ -4,6 +4,11 @@ Needs a Spotify developer app (free): https://developer.spotify.com/dashboard
   - Redirect URI must be exactly:  http://127.0.0.1:8765/spotify/callback
   - Copy the Client ID into Slipbeats → Spotify…
 Tokens are stored in ~/.slipbeats/spotify.json.
+
+Development Mode rules since 9 March 2026: the account that owns the developer app must have
+an active Spotify Premium subscription, one Development Mode app per developer, up to 25
+accounts on the app's user list, and playlist CONTENTS are only readable for playlists the
+logged-in account owns or collaborates on. Spotify.diagnose() probes all of this.
 """
 from __future__ import annotations
 
@@ -161,17 +166,105 @@ class Spotify:
             except Exception:
                 msg = raw
             hint = ""
+            bare = path.split("?")[0]
             if e.code == 403:
-                low = msg.lower()
-                if "scope" in low:
-                    hint = "  → The login didn't include playlist permissions. Open Spotify… → Disconnect → Connect again and approve everything."
-                elif "not registered" in low or "user" in low:
-                    hint = "  → In development mode Spotify only allows accounts listed under the app's User Management (developer dashboard → your app → Settings → User Management). Add this account's email there."
+                if "scope" in msg.lower():
+                    hint = ("\n  → The login is missing playlist permissions. Spotify… → Disconnect → Connect, "
+                            "and approve everything on the Spotify page.")
+                elif method == "GET" and bare.endswith("/items"):
+                    hint = ("\n  → Since February 2026 a Development Mode app can only read the contents of "
+                            "playlists the logged-in account owns or collaborates on.")
                 else:
-                    hint = "  → Development-mode apps may need the account added under User Management in the developer dashboard."
+                    hint = ("\n  → Development Mode rules since 9 March 2026: the Spotify account that owns the "
+                            "developer app must have an active Premium subscription, one Development Mode app per "
+                            "developer, and every account using it must be on the app's user list (dashboard → "
+                            "your app → Settings → User Management). Spotify… → Check setup runs all of this.")
+            elif e.code == 404:
+                hint = ("\n  → Either that playlist/album does not exist or is private, or Spotify removed this "
+                        "endpoint in the February 2026 API change.")
             raise SpotifyError(f"Spotify API {e.code} on {method} {path}: {msg}{hint}")
         except urllib.error.URLError as e:
             raise SpotifyError(f"Network error talking to Spotify: {e.reason}")
+
+    # ----- self-check -----
+    def diagnose(self, playlist_url: str = "") -> dict:
+        """Probe the Spotify setup and report, in plain English, what is refused and why."""
+        checks: list[dict] = []
+        refused = False
+
+        def add(name, ok, detail):
+            checks.append(dict(name=name, ok=bool(ok), detail=str(detail)))
+
+        if not self.client_id:
+            add("Client ID", False, "No Client ID saved. Copy it from your app's Settings page and paste it above.")
+            return dict(checks=checks, verdict="Slipbeats has no Spotify Client ID yet.")
+        add("Client ID", True, f"{self.client_id[:6]}… ({len(self.client_id)} characters)")
+
+        if not self.connected:
+            add("Logged in", False, "Not connected. Press Connect and approve Slipbeats in the browser tab.")
+            return dict(checks=checks, verdict="Not connected to Spotify yet.")
+
+        try:
+            self._refresh()
+            add("Token refresh", True, "Spotify issued a fresh access token.")
+        except SpotifyError as e:
+            add("Token refresh", False, e)
+            return dict(checks=checks,
+                        verdict="Spotify refused to issue a token at all. Disconnect, then Connect again. If that "
+                                "still fails, the Client ID no longer matches a live app in your dashboard.")
+
+        probes = (("Your account", lambda: self.api("GET", "/me")),
+                  ("Your playlists", lambda: self.api("GET", "/me/playlists", params={"limit": 1})),
+                  ("Search", lambda: self.api("GET", "/search", params={"q": "track:Respect artist:Aretha Franklin",
+                                                                        "type": "track", "limit": 1})))
+        for label, fn in probes:
+            try:
+                r = fn()
+                if label == "Your account":
+                    add(label, True, f"{r.get('display_name') or r.get('id')} ({r.get('id')})")
+                else:
+                    add(label, True, "Allowed.")
+            except SpotifyError as e:
+                refused = refused or " 403 " in f" {e} "
+                add(label, False, e)
+
+        if playlist_url.strip():
+            parsed = self.parse_url(playlist_url)
+            if not parsed:
+                add("Playlist link", False, "That is not a Spotify playlist or album link.")
+            elif parsed[0] == "playlist":
+                sid = parsed[1]
+                try:
+                    meta = self.api("GET", f"/playlists/{sid}", params={"fields": "name,owner(display_name,id)"})
+                    own = meta.get("owner") or {}
+                    add("Playlist details", True,
+                        f"“{meta.get('name')}” — owned by {own.get('display_name') or own.get('id') or 'someone else'}")
+                    try:
+                        self.api("GET", f"/playlists/{sid}/items", params={"limit": 1})
+                        add("Playlist contents", True, "Readable — you own or collaborate on this one.")
+                    except SpotifyError as e:
+                        add("Playlist contents", False, e)
+                except SpotifyError as e:
+                    add("Playlist details", False, e)
+
+        failed = [c["name"] for c in checks if not c["ok"]]
+        if not failed:
+            verdict = "Everything Slipbeats needs is working."
+        elif refused:
+            verdict = ("Spotify is refusing calls that every app needs, which since 9 March 2026 almost always means "
+                       "the Development Mode rules. Check, in this order: (1) the Spotify account that owns the "
+                       "developer app has an active Premium subscription; (2) you have only ONE app in the dashboard "
+                       "— delete the spares, a second one is dead on arrival; (3) the account you log in with is "
+                       "listed under the app → Settings → User Management, with the name and email exactly as "
+                       "they appear on that Spotify account.")
+        elif "Playlist contents" in failed:
+            verdict = ("Your login is fine — Spotify just will not hand an app the contents of a playlist you do "
+                       "not own. Saving or following it to your library does NOT make you the owner. In Spotify, "
+                       "open the playlist, ⌘A to select every track, right-click → Add to playlist → New "
+                       "playlist; paste that new link here instead. Or paste the song list as text.")
+        else:
+            verdict = "Some checks failed — see the detail above."
+        return dict(checks=checks, verdict=verdict)
 
     # ----- playlists -----
     @staticmethod
@@ -193,15 +286,24 @@ class Spotify:
         kind, sid = p
         tracks = []
         if kind == "playlist":
-            meta = self.api("GET", f"/playlists/{sid}", params={"fields": "name,owner(display_name)"})
+            meta = self.api("GET", f"/playlists/{sid}", params={"fields": "name,owner(display_name,id)"})
             name = meta.get("name", "Spotify playlist")
-            # Spotify's 2026 API: /playlists/{id}/items with items[].item (was /tracks with items[].track)
+            own = meta.get("owner") or {}
+            owner = own.get("display_name") or own.get("id") or "another account"
+            # February 2026 API: /playlists/{id}/items (was /tracks), items[].item (was items[].track)
+            fields = "next,items(item(name,artists(name),duration_ms,uri))"
             try:
-                page = self.api("GET", f"/playlists/{sid}/items",
-                                params={"limit": 100, "fields": "next,items(item(name,artists(name),duration_ms,uri))"})
-            except SpotifyError:
-                page = self.api("GET", f"/playlists/{sid}/tracks",
-                                params={"limit": 100, "fields": "next,items(track(name,artists(name),duration_ms,uri))"})
+                page = self.api("GET", f"/playlists/{sid}/items", params={"limit": 50, "fields": fields})
+            except SpotifyError as e:
+                if " 403 " in f" {e} ":
+                    raise SpotifyError(
+                        f'Spotify will not give Slipbeats the contents of \u201c{name}\u201d — {owner} owns it. '
+                        "Since February 2026 an app may only read playlists you OWN or collaborate on. Saving or "
+                        "following it to your library does not count — you are still not the owner. Open it in "
+                        "Spotify, press ⌘A to select every track, right-click → Add to playlist → New playlist, "
+                        "and paste THAT link here. Or paste the song list as text."
+                    ) from None
+                page = self.api("GET", f"/playlists/{sid}/items", params={"limit": 50})
             while True:
                 for it in page.get("items", []):
                     t = it.get("item") or it.get("track") or {}
@@ -237,31 +339,16 @@ class Spotify:
         return dict(uri=t["uri"], title=t["name"], artist=", ".join(a["name"] for a in t.get("artists", [])))
 
     def create_playlist(self, name: str, requests: list[dict], description: str = "") -> dict:
-        user = self.data.get("user") or {}
-        uid = user.get("id") or self.api("GET", "/me")["id"]
         found, not_found = [], []
         for r in requests:
             uri = r.get("uri")
             hit = dict(uri=uri, title=r.get("title"), artist=r.get("artist")) if uri else self.find_track(r.get("artist", ""), r.get("title", ""))
             (found if hit else not_found).append(hit or r)
         payload = dict(name=name, public=False, description=(description or "Created by Slipbeats")[:300])
-        # Spotify's 2026 API: POST /me/playlists (the /users/{id}/playlists form now returns 403 for dev-mode apps)
-        try:
-            pl = self.api("POST", "/me/playlists", body=payload)
-        except SpotifyError as first:
-            try:
-                pl = self.api("POST", f"/users/{uid}/playlists", body=payload)
-            except SpotifyError:
-                raise first
+        # February 2026 API: POST /me/playlists (POST /users/{id}/playlists was removed)
+        pl = self.api("POST", "/me/playlists", body=payload)
         uris = [f["uri"] for f in found]
         for i in range(0, len(uris), 100):
-            chunk = dict(uris=uris[i:i + 100])
-            try:
-                self.api("POST", f"/playlists/{pl['id']}/items", body=chunk)
-            except SpotifyError as first:
-                try:
-                    self.api("POST", f"/playlists/{pl['id']}/tracks", body=chunk)
-                except SpotifyError:
-                    raise first
+            self.api("POST", f"/playlists/{pl['id']}/items", body=dict(uris=uris[i:i + 100]))
         return dict(url=(pl.get("external_urls") or {}).get("spotify"), id=pl["id"], name=name,
                     added=found, not_found=not_found)

@@ -277,6 +277,11 @@ Everywhere by Fleetwood Mac
     <li>Open the app's <b>Settings</b>, copy the <b>Client ID</b> and paste it below. Then <b>Connect</b> — a browser tab opens to approve.</li>
   </ol>
   <div class="row"><input id="spclient" placeholder="Client ID (32 characters)"><button id="btnSpSaveId">Save ID</button></div>
+  <details style="margin-top:12px"><summary class="hint">Spotify says 403 Forbidden?</summary>
+    <div class="hint" style="margin-top:6px;line-height:1.6">Since 9 March 2026 a Development Mode app only works if the Spotify account that owns it has an active <b>Premium</b> subscription, you keep only <b>one</b> app in the dashboard, and every account that logs in is listed under <b>Settings &rarr; User Management</b>. Separately, Spotify will not release the <i>contents</i> of a playlist you do not own &mdash; copy those tracks into a playlist on your own account, or paste the list as text.</div>
+    <div class="row" style="margin-top:8px"><input id="spdiagurl" placeholder="Optional: a playlist link to test" style="flex:1"><button id="btnSpCheck">Check setup</button></div>
+    <div id="spdiag" class="hint" style="margin-top:8px"></div>
+  </details>
   <div class="row" style="justify-content:flex-end;margin-top:16px"><button class="ghost" id="btnSpLogout">Disconnect</button><span style="flex:1"></span><button class="ghost" id="btnCloseSpotify">Close</button><button class="primary" id="btnSpConnect">Connect</button></div>
 </dialog>
 
@@ -677,6 +682,12 @@ $('#btnSpConnect').onclick=async()=>{const cid=$('#spclient').value.trim();if(!c
     let tries=0;const poll=setInterval(async()=>{const st=await spStatus();if(st.connected||++tries>90){clearInterval(poll);if(st.connected){toast(`Spotify connected as ${st.user?.name||''}`);openSpotify()}}},2000);
   }catch(e){toast(e.message,true)}};
 $('#btnSpLogout').onclick=async()=>{await api.post('/api/spotify/logout',{});openSpotify()};
+$('#btnSpCheck').onclick=async()=>{const b=$('#btnSpCheck'),out=$('#spdiag');b.disabled=true;b.textContent='Checking\u2026';out.innerHTML='';
+  try{const j=await api.post('/api/spotify/diagnose',{url:$('#spdiagurl').value.trim()});
+    const rows=(j.checks||[]).map(c=>`<div style="margin:3px 0"><span style="color:${c.ok?'var(--ok)':'#e2504a'}">${c.ok?'\u2713':'\u2717'}</span> <b>${esc(c.name)}</b> \u2014 ${esc(c.detail)}</div>`).join('');
+    out.innerHTML=rows+`<div style="margin-top:10px;padding:8px 10px;border-radius:6px;background:rgba(127,127,127,.12);line-height:1.6">${esc(j.verdict||'')}</div>`;
+  }catch(e){out.innerHTML=`<span style="color:#e2504a">${esc(e.message)}</span>`}
+  finally{b.disabled=false;b.textContent='Check setup'}};
 $('#btnSpFetch').onclick=async()=>{const url=$('#spurl').value.trim();if(!url)return;
   const st=await spStatus();if(!st.connected){openSpotify();return toast('Connect Spotify first — one-off setup, then links just work',true)}
   $('#btnSpFetch').disabled=true;$('#btnSpFetch').textContent='Fetching…';

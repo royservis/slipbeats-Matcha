@@ -403,6 +403,8 @@ def make_handler(app: App):
                 if p == "/api/spotify/logout":
                     app.spotify.logout()
                     return self._json(dict(ok=True))
+                if p == "/api/spotify/diagnose":
+                    return self._json(app.spotify.diagnose(body.get("url", "")))
                 if p == "/api/spotify/playlist":
                     res = app.spotify.fetch_tracks(body.get("url", ""))
                     lines = []
